@@ -7,7 +7,7 @@ Discord journaling bot built on discord.js 14 and Sapphire. Everything is Compon
 - The bot scans every journal forum, parses each post's `PNL:` line and totals PnL by day, week and month.
 - Weekly image (calendar, five weekdays, weekend folded into the total) is posted to a report channel at the day and time you choose.
 - Month-end image (every day of the month) is posted on the last day of the month.
-- `/journal-settings` opens a Components V2 settings panel (General / Schedule / Advanced).
+- `/journal-settings` opens a Components V2 settings panel (General / Outcome forums / Schedule / Advanced).
 - `/pnl week [date]`, `/pnl month [YYYY-MM]`, `/pnl rescan`.
 - Message context menu **Edit journal PnL**: override the PnL of any journal post (used for the images, post text unchanged).
 
@@ -19,7 +19,7 @@ It does not register or touch any `/settings` command.
 2. Invite with scopes `bot` + `applications.commands`. Permissions in the journal forums: View Channel, Send Messages, Send Messages in Threads, Create Public Posts, Attach Files, Read Message History, Manage Threads. In the report channel: View, Send, Attach Files.
 3. `cp .env.example .env`, then set `DISCORD_TOKEN`, `OWNER_ID` (your user id) and, while testing, `GUILD_ID`.
 4. `npm install`, then `npm start` (Node 20+).
-5. In Discord run `/journal-settings` → **General**: pick the journal forums, a default forum and the report channel. **Schedule**: weekly day/time, month-end time, timezone (default America/New_York). **Advanced**: currency, R multiples, ping role, allowed users, previews, "post now", rescan and the health check.
+5. In Discord run `/journal-settings`. **Outcome forums**: choose the forum for each category (Win, Loss, Breakeven, Missed); `/journal` posts each outcome into its own forum. **General**: a default forum (used for any outcome without its own), the report channel, and optional extra forums to scan. **Schedule**: weekly day/time, month-end time, timezone (default America/New_York). **Advanced**: currency, R multiples, ping role, allowed users, previews, "post now", rescan and the health check.
 6. Run `/pnl rescan` once to pull in your existing posts.
 
 ### Forum tags (optional but recommended)

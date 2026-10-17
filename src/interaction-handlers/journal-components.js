@@ -7,6 +7,7 @@ const { isAllowed } = require('../lib/permissions');
 const { postJournal } = require('../lib/poster');
 const { OUTCOMES } = require('../lib/format');
 const { card, ephemeral } = require('../lib/ui');
+const { routeForum } = require('../lib/routing');
 
 class JournalComponents extends InteractionHandler {
   constructor(ctx, opts) { super(ctx, { ...opts, interactionHandlerType: InteractionHandlerTypes.MessageComponent }); }
@@ -25,6 +26,7 @@ class JournalComponents extends InteractionHandler {
 
     if (action === 'o') {
       draft.outcome = arg;
+      if (!draft.fields._forum_manual) draft.forumId = routeForum(settings, arg);   // each outcome has its own forum unless the user overrode it
       if (arg === 'missed') draft.fields.pnl_cents = 0;
       else if (draft.fields.pnl_cents !== undefined && draft.fields.pnl_cents !== null) {
         const c = draft.fields.pnl_cents; draft.fields.pnl_cents = arg === 'win' ? Math.abs(c) : arg === 'loss' ? -Math.abs(c) : c;
@@ -41,7 +43,7 @@ class JournalComponents extends InteractionHandler {
       }
     }
     if (action === 'forum') {
-      draft.forumId = i.values[0]; saveDraft(draft); return refresh();
+      draft.forumId = i.values[0]; draft.fields._forum_manual = true; saveDraft(draft); return refresh();
     }
     if (action === 'preview') {
       if (!draft.outcome) return refresh('Pick an outcome first.');
@@ -60,10 +62,10 @@ class JournalComponents extends InteractionHandler {
         const c = new ContainerBuilder().setAccentColor(OUTCOMES[draft.outcome].color)
           .addTextDisplayComponents(new TextDisplayBuilder().setContent(`# Posted\n<#${thread.id}>${tagApplied ? '' : `\n-# No \`${OUTCOMES[draft.outcome].tag}\` tag exists on that forum, so the post has no tag. Add one to enable tag-based outcome detection.`}`))
           .addActionRowComponents(new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Open post').setURL(`https://discord.com/channels/${i.guildId}/${thread.id}`)));
-        return i.editReply({ components: [c] });
+        return await i.editReply({ components: [c] });
       } catch (e) {
         this.container.logger.error('[journal] post failed', e);
-        return i.editReply({ components: [journalPanel(draft, i.guild, settings, { notice: `⚠️ Could not post: ${e.message}` })] });
+        return i.editReply({ components: [journalPanel(draft, i.guild, settings, { notice: `⚠️ Could not post: ${e.message}` })] }).catch(() => {});
       }
     }
     return undefined;

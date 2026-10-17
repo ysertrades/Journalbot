@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS journal_settings (
   currency TEXT NOT NULL DEFAULT '$',
   show_r INTEGER NOT NULL DEFAULT 1,
   ping_role_id TEXT,
-  allowed_users_json TEXT NOT NULL DEFAULT '[]'
+  allowed_users_json TEXT NOT NULL DEFAULT '[]',
+  outcome_forums_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS journal_drafts (
   draft_id TEXT PRIMARY KEY,
@@ -80,12 +81,17 @@ CREATE TABLE IF NOT EXISTS report_log (
 );
 `);
 
+// Additive migration: databases created before per-outcome forums existed
+if (!db.prepare("PRAGMA table_info(journal_settings)").all().some((c) => c.name === 'outcome_forums_json')) {
+  db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_forums_json TEXT NOT NULL DEFAULT '{}'");
+}
+
 const DEFAULTS = {
   forums: [], default_forum_id: null, report_channel_id: null,
   weekly_day: 5, weekly_time: '17:00', weekly_enabled: true,
   month_enabled: true, month_time: '17:00',
   timezone: 'America/New_York', currency: '$', show_r: true,
-  ping_role_id: null, allowed_users: [],
+  ping_role_id: null, allowed_users: [], outcome_forums: {},
 };
 
 function rowToSettings(guildId, r) {
@@ -98,6 +104,7 @@ function rowToSettings(guildId, r) {
     month_enabled: !!r.month_enabled, month_time: r.month_time,
     timezone: r.timezone, currency: r.currency, show_r: !!r.show_r,
     ping_role_id: r.ping_role_id, allowed_users: JSON.parse(r.allowed_users_json || '[]'),
+    outcome_forums: JSON.parse(r.outcome_forums_json || '{}'),
   };
 }
 
@@ -110,19 +117,20 @@ function saveSettings(guildId, patch) {
   const n = { ...cur, ...patch };
   db.prepare(`INSERT INTO journal_settings
     (guild_id, forums_json, default_forum_id, report_channel_id, weekly_day, weekly_time, weekly_enabled,
-     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json)
+     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json)
     VALUES (@guild_id,@forums_json,@default_forum_id,@report_channel_id,@weekly_day,@weekly_time,@weekly_enabled,
-     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json)
+     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json)
     ON CONFLICT(guild_id) DO UPDATE SET forums_json=excluded.forums_json, default_forum_id=excluded.default_forum_id,
      report_channel_id=excluded.report_channel_id, weekly_day=excluded.weekly_day, weekly_time=excluded.weekly_time,
      weekly_enabled=excluded.weekly_enabled, month_enabled=excluded.month_enabled, month_time=excluded.month_time,
      timezone=excluded.timezone, currency=excluded.currency, show_r=excluded.show_r, ping_role_id=excluded.ping_role_id,
-     allowed_users_json=excluded.allowed_users_json`).run({
+     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json`).run({
     guild_id: guildId, forums_json: JSON.stringify(n.forums || []), default_forum_id: n.default_forum_id ?? null,
     report_channel_id: n.report_channel_id ?? null, weekly_day: n.weekly_day, weekly_time: n.weekly_time,
     weekly_enabled: n.weekly_enabled ? 1 : 0, month_enabled: n.month_enabled ? 1 : 0, month_time: n.month_time,
     timezone: n.timezone, currency: n.currency, show_r: n.show_r ? 1 : 0, ping_role_id: n.ping_role_id ?? null,
     allowed_users_json: JSON.stringify(n.allowed_users || []),
+    outcome_forums_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_forums || {}).filter(([, v]) => v))),
   });
   return getSettings(guildId);
 }

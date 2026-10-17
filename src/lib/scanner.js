@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const { ChannelType } = require('discord.js');
 const { parseText, resolveEntry, tagToOutcome } = require('./parse');
 const { extractText } = require('./text');
+const { allForums } = require('./routing');
 const { upsertPnl, getPnlEntry, deletePnl, pnlThreadIdsForForum } = require('./db');
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex');
@@ -49,7 +50,7 @@ async function allThreads(forum, guild) {
  */
 async function scanGuild(guild, settings, { force = false, onProgress } = {}) {
   const summary = { threads: 0, updated: 0, unchanged: 0, unparsed: [], removed: 0, errors: [] };
-  for (const forumId of settings.forums) {
+  for (const forumId of allForums(settings)) {
     const forum = await guild.channels.fetch(forumId).catch(() => null);
     if (!isForum(forum)) { summary.errors.push(`<#${forumId}> not found or not a forum`); continue; }
     let threads;

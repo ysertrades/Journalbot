@@ -6,6 +6,7 @@ const {
 } = require('discord.js');
 const { OUTCOMES, NEUTRAL_COLOR, findEmoji, emojiToken, buildPostBody } = require('./format');
 const { formatCents, formatR, formatDateDisplay } = require('./money');
+const { routeForum } = require('./routing');
 
 const td = (c) => new TextDisplayBuilder().setContent(c);
 const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
@@ -67,7 +68,8 @@ function journalPanel(draft, guild, settings, { notice } = {}) {
     sec('Picture', draft.image ? `✅ ${draft.image.name}` : '⬜ None (shown above the journal text)', 'edit:pic', draft.image ? 'Replace' : 'Add', false),
   );
   c.addSeparatorComponents(sep());
-  c.addTextDisplayComponents(td('**Post to forum**'));
+  const auto = routeForum(settings, draft.outcome);
+  c.addTextDisplayComponents(td(`**Post to forum**${draft.outcome && auto && !draft.fields._forum_manual ? `\n-# Auto-selected for ${meta.label}: <#${auto}>. Pick another to override.` : ''}`));
   const sel = new ChannelSelectMenuBuilder().setCustomId(`jr:${id}:forum`).setPlaceholder('Select a forum channel')
     .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(1).setMaxValues(1);
   if (draft.forumId) sel.setDefaultChannels(draft.forumId);
@@ -166,7 +168,7 @@ function simpleModal(id, title, labelText, value, placeholder, max = 40) {
 /* ======================= SETTINGS PANEL ======================= */
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const mention = (ids) => (ids && ids.length ? ids.map((i) => `<#${i}>`).join(' ') : '*none*');
-const PAGES = [['general', 'General'], ['schedule', 'Schedule'], ['advanced', 'Advanced']];
+const PAGES = [['general', 'General'], ['outcomes', 'Outcome forums'], ['schedule', 'Schedule'], ['advanced', 'Advanced']];
 
 function settingsPanel(page, s, healthLines) {
   const c = new ContainerBuilder().setAccentColor(NEUTRAL_COLOR);
@@ -174,8 +176,8 @@ function settingsPanel(page, s, healthLines) {
   c.addActionRowComponents(row(...PAGES.map(([k, l]) => btn(`js:nav:${k}`, l, k === page ? ButtonStyle.Primary : ButtonStyle.Secondary))));
   c.addSeparatorComponents(sep());
   if (page === 'general') {
-    c.addTextDisplayComponents(td(`**Journal forums** (scanned for PnL)\n${mention(s.forums)}`));
-    const f = new ChannelSelectMenuBuilder().setCustomId('js:general:forums').setPlaceholder('Select journal forums')
+    c.addTextDisplayComponents(td(`**Extra forums to scan for PnL**\n-# Outcome forums and the default forum are scanned automatically\n${mention(s.forums)}`));
+    const f = new ChannelSelectMenuBuilder().setCustomId('js:general:forums').setPlaceholder('Select extra forums to scan')
       .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(0).setMaxValues(25);
     if (s.forums.length) f.setDefaultChannels(s.forums.slice(0, 25));
     c.addActionRowComponents(row(f));
@@ -189,6 +191,16 @@ function settingsPanel(page, s, healthLines) {
       .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setMinValues(0).setMaxValues(1);
     if (s.report_channel_id) r.setDefaultChannels(s.report_channel_id);
     c.addActionRowComponents(row(r));
+  } else if (page === 'outcomes') {
+    c.addTextDisplayComponents(td('**Where each outcome is posted**\n-# /journal posts a Win to the Win forum, a Loss to the Loss forum, and so on. Outcomes without a forum use the default forum (General page).'));
+    for (const o of Object.values(OUTCOMES)) {
+      const cur = s.outcome_forums?.[o.key];
+      c.addTextDisplayComponents(td(`${o.fallback} **${o.label} forum**\n${cur ? `<#${cur}>` : s.default_forum_id ? `*not set, uses default* <#${s.default_forum_id}>` : '*not set*'}`));
+      const m = new ChannelSelectMenuBuilder().setCustomId(`js:outcomes:${o.key}`).setPlaceholder(`Select the ${o.label} forum`)
+        .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(0).setMaxValues(1);
+      if (cur) m.setDefaultChannels(cur);
+      c.addActionRowComponents(row(m));
+    }
   } else if (page === 'schedule') {
     c.addTextDisplayComponents(td(`**Timezone:** \`${s.timezone}\``));
     c.addSectionComponents(new SectionBuilder().addTextDisplayComponents(td(`**Weekly report**\n-# ${DAYS[s.weekly_day - 1]} at ${s.weekly_time}`))

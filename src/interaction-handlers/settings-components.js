@@ -57,6 +57,7 @@ async function handleSettings(i) {
   const ids = i.values || [];
   const patch = {
     general: { forums: { forums: ids }, defforum: { default_forum_id: ids[0] || null }, repchan: { report_channel_id: ids[0] || null } },
+    outcomes: action ? { [action]: { outcome_forums: { ...s.outcome_forums, [action]: ids[0] || null } } } : {},
     schedule: { toggle_weekly: { weekly_enabled: !s.weekly_enabled }, toggle_month: { month_enabled: !s.month_enabled }, day: { weekly_day: Number(ids[0] || s.weekly_day) } },
     advanced: { toggle_r: { show_r: !s.show_r }, role: { ping_role_id: ids[0] || null }, users: { allowed_users: ids } },
   }[page]?.[action];

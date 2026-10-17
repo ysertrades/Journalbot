@@ -32,6 +32,7 @@ async function postJournal({ guild, draft, settings }) {
   const forum = await guild.channels.fetch(draft.forumId).catch(() => null);
   if (!forum || ![ChannelType.GuildForum, ChannelType.GuildMedia].includes(forum.type)) throw new Error('The selected forum channel no longer exists.');
   const outcome = draft.outcome, f = { ...draft.fields };
+  delete f._forum_manual;
   if (outcome === 'missed') f.pnl_cents = 0;
   const body = buildPostBody(outcome, f, { emoji: emojiToken(guild, outcome), symbol: settings.currency, showR: settings.show_r }).slice(0, 3900);
   const title = threadTitle(outcome, f, settings.currency);

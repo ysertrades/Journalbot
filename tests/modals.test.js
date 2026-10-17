@@ -46,5 +46,5 @@ test('panels stay under the 40 component Discord limit', () => {
   const { DEFAULTS } = require('../src/lib/db');
   const s = { ...DEFAULTS, forums: ['1'], allowed_users: ['1'] };
   for (const o of [null, ...OUTCOMES]) assert.ok(count(p.journalPanel({ ...mk(o), forumId: '1', image: { name: 'a.png' } }, g, s).toJSON()) <= 40);
-  for (const pg of ['general', 'schedule', 'advanced']) assert.ok(count(p.settingsPanel(pg, s, ['x']).toJSON()) <= 40, pg);
+  for (const pg of ['general', 'outcomes', 'schedule', 'advanced']) assert.ok(count(p.settingsPanel(pg, s, ['x']).toJSON()) <= 40, pg);
 });

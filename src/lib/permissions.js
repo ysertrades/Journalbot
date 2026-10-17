@@ -1,6 +1,7 @@
 'use strict';
 const { PermissionFlagsBits } = require('discord.js');
 const { getSettings } = require('./db');
+const { allForums } = require('./routing');
 
 const owners = () => (process.env.OWNER_ID || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -42,8 +43,7 @@ async function healthCheck(guild, settings) {
     }
     lines.push(missing.length || extra ? `⚠️ <#${id}>${missing.length ? ` missing ${missing.join(', ')}` : ''}${extra}` : `✅ <#${id}> permissions OK`);
   };
-  for (const id of settings.forums) await check(id, 'forum');
-  if (settings.default_forum_id && !settings.forums.includes(settings.default_forum_id)) await check(settings.default_forum_id, 'forum');
+  for (const id of allForums(settings)) await check(id, 'forum');
   if (settings.report_channel_id) await check(settings.report_channel_id, 'report');
   const names = ['ywin', 'yloss', 'ybe', 'ymissed'];
   const found = names.filter((n) => guild.emojis.cache.some((e) => e.name === n));
@@ -51,7 +51,8 @@ async function healthCheck(guild, settings) {
     : `⚠️ Emojis missing: ${names.filter((n) => !found.includes(n)).join(', ')} (unicode fallbacks used)`);
   const intents = guild.client.options.intents;
   lines.push(intents.has('MessageContent') ? '✅ Message Content intent requested (also enable it in the Developer Portal)' : '⚠️ Message Content intent not requested');
-  if (!settings.forums.length) lines.push('⚠️ No journal forums selected yet (General page)');
+  const unrouted = ['win', 'loss', 'be', 'missed'].filter((k) => !settings.outcome_forums?.[k] && !settings.default_forum_id);
+  if (unrouted.length) lines.push(`⚠️ No forum set for: ${unrouted.join(', ')} (Outcome forums page)`);
   if (!settings.report_channel_id) lines.push('⚠️ No report channel selected yet (General page)');
   return lines;
 }

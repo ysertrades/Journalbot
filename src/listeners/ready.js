@@ -4,6 +4,7 @@ const cron = require('node-cron');
 const { purgeDrafts, listConfiguredGuilds, getSettings } = require('../lib/db');
 const { tick } = require('../lib/reports');
 const { scanGuild } = require('../lib/scanner');
+const { allForums } = require('../lib/routing');
 
 class ReadyListener extends Listener {
   constructor(ctx, opts) { super(ctx, { ...opts, event: 'clientReady', once: true }); }
@@ -17,7 +18,7 @@ class ReadyListener extends Listener {
     cron.schedule('30 3 * * *', safe('nightly rescan', async () => {            // safety net for edits made while the bot was offline
       for (const gid of listConfiguredGuilds()) {
         const guild = client.guilds.cache.get(gid), s = getSettings(gid);
-        if (guild && s.forums.length) await scanGuild(guild, s);
+        if (guild && allForums(s).length) await scanGuild(guild, s);
       }
     }));
     setTimeout(safe('startup tick', () => tick(client)), 15_000);                  // catch up on anything missed while offline
