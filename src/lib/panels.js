@@ -96,7 +96,8 @@ const txt = (id, { style = TextInputStyle.Short, value, placeholder, max = 100, 
   if (placeholder) t.setPlaceholder(placeholder);
   return t;
 };
-const sel = (id, options, current, placeholder) => new StringSelectMenuBuilder().setCustomId(id).setMinValues(0).setMaxValues(1)
+// Modal selects are required by default in Discord; min_values 0 is rejected (400) unless required is explicitly false
+const sel = (id, options, current, placeholder) => new StringSelectMenuBuilder().setCustomId(id).setMinValues(0).setMaxValues(1).setRequired(false)
   .setPlaceholder(placeholder || 'Choose').addOptions(options.map((o) => ({ label: o, value: o, default: o === current })));
 const selLbl = (title, s) => new LabelBuilder().setLabel(title).setStringSelectMenuComponent(s);
 const money = (v) => (v === undefined || v === null ? '' : String(v / 100));

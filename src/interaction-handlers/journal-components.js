@@ -32,9 +32,13 @@ class JournalComponents extends InteractionHandler {
       saveDraft(draft); return refresh();
     }
     if (action === 'edit') {
-      if (arg === 'pic') return i.showModal(pictureModal(draft));
-      if (!draft.outcome) return refresh('Pick an outcome first.');
-      return i.showModal({ trade: tradeModal, result: resultModal, notes: notesModal }[arg](draft));
+      if (arg !== 'pic' && !draft.outcome) return refresh('Pick an outcome first.');
+      try {
+        return await i.showModal({ pic: pictureModal, trade: tradeModal, result: resultModal, notes: notesModal }[arg](draft));
+      } catch (e) {
+        this.container.logger.error(`[journal] could not open ${arg} modal`, e);
+        return i.reply(ephemeral(card(`\u26A0\uFE0F Could not open that form: ${e.message}`, 0xf87171))).catch(() => {});
+      }
     }
     if (action === 'forum') {
       draft.forumId = i.values[0]; saveDraft(draft); return refresh();

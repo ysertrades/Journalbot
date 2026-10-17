@@ -53,12 +53,12 @@ async function postJournal({ guild, draft, settings }) {
     if (/Missing Permissions|Missing Access/i.test(err.message)) throw new Error(`Missing permission to create posts in <#${forum.id}>.`);
     const chunks = chunkText(body, 1900);
     const f2 = file ? new AttachmentBuilder(file.attachment, { name: file.name }) : null;
+    // with a picture the picture is the starter message and all text follows in the thread; otherwise the first chunk is the starter
     thread = await forum.threads.create({
       name: title, appliedTags: tag ? [tag.id] : [],
       message: file ? { files: [f2] } : { content: chunks.shift() },
     });
-    if (file) { /* picture is the starter message; text follows in the thread */ }
-    for (const c of chunks.length || !file ? chunks : chunkText(body, 1900)) await thread.send({ content: c });
+    for (const c of chunks) await thread.send({ content: c });
   }
   const entry = {
     guild_id: guild.id, user_id: draft.userId, outcome, instrument: f.instrument || null, direction: f.direction || null, session: f.session || null,
