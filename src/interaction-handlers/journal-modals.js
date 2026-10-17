@@ -1,0 +1,86 @@
+'use strict';
+const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
+const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl } = require('../lib/db');
+const { journalPanel } = require('../lib/panels');
+const { isAllowed, canConfigure } = require('../lib/permissions');
+const { validateImage, imageRecord } = require('../lib/poster');
+const { parseMoney, parseR, applyOutcomeSign, parseDateInput, formatCents } = require('../lib/money');
+const { card, ephemeral } = require('../lib/ui');
+
+const val = (f, id) => { try { return (f.getTextInputValue(id) || '').trim(); } catch { return ''; } };
+const sel = (f, id) => { try { return f.getStringSelectValues(id)[0] || null; } catch { return null; } };
+const setOrDrop = (obj, k, v) => { if (v) obj[k] = v; else delete obj[k]; };
+
+class JournalModals extends InteractionHandler {
+  constructor(ctx, opts) { super(ctx, { ...opts, interactionHandlerType: InteractionHandlerTypes.ModalSubmit }); }
+  parse(i) {
+    if (i.customId.startsWith('jrm:')) { const [, id, kind] = i.customId.split(':'); return this.some({ type: 'draft', id, kind }); }
+    if (i.customId.startsWith('jsm:')) return this.some({ type: 'settings' });
+    if (i.customId.startsWith('jre:')) return this.some({ type: 'edit', id: i.customId.slice(4) });
+    return this.none();
+  }
+
+  async run(i, p) {
+    if (p.type === 'settings') return require('./settings-components').handleSettings(i);
+    if (p.type === 'edit') return this.editPnl(i, p.id);
+    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    const draft = getDraft(p.id);
+    if (!draft) return i.reply(ephemeral(card('This journal panel expired. Run `/journal` again.', 0xfbbf24)));
+    if (draft.userId !== i.user.id) return i.reply(ephemeral(card('This panel belongs to someone else.', 0xf87171)));
+    const settings = getSettings(i.guildId), f = i.fields, d = draft.fields;
+    let notice;
+
+    if (p.kind === 'trade') {
+      const date = parseDateInput(val(f, 'date'), settings.timezone);
+      if (!date) notice = '⚠️ Could not read that date. Try `today`, `yesterday` or `2026-10-16`. Other changes were saved.';
+      else d.date = date;
+      d.instrument = val(f, 'instrument').toUpperCase().replace(/[`\n]/g, '').slice(0, 20);
+      const dir = sel(f, 'direction'); if (dir) d.direction = dir;
+      setOrDrop(d, 'session', sel(f, 'session'));
+      setOrDrop(d, 'setup', val(f, 'setup').replace(/`/g, "'"));
+    } else if (p.kind === 'result') {
+      const o = draft.outcome;
+      const lvl = (k) => setOrDrop(d, k, val(f, k).replace(/`/g, "'"));
+      if (o === 'missed') {
+        const raw = val(f, 'potential');
+        if (raw) { const c = parseMoney(raw); if (c === null) notice = '⚠️ Potential PnL is not a valid amount.'; else d.potential_cents = Math.abs(c); } else delete d.potential_cents;
+        d.pnl_cents = 0; ['entry', 'stop', 'target'].forEach(lvl);
+      } else {
+        const c = parseMoney(val(f, 'pnl'));
+        if (c === null) notice = '⚠️ PnL is not a valid amount. Use e.g. `1250` or `480.50`.';
+        else d.pnl_cents = applyOutcomeSign(o, c);
+        if (o !== 'be') {
+          const raw = val(f, 'r');
+          if (raw) { const r = parseR(raw); if (Number.isNaN(r)) notice = '⚠️ R multiple is not a number.'; else d.r = r; } else delete d.r;
+        }
+        ['entry', 'stop'].forEach(lvl);
+        if (o === 'win') lvl('target');
+        if (o === 'be') lvl('exit');
+      }
+    } else if (p.kind === 'notes') {
+      for (const k of ['why', 'p1', 'p2', 'lesson']) { try { setOrDrop(d, k, val(f, k)); } catch { /* field absent for this outcome */ } }
+      setOrDrop(d, 'followed', sel(f, 'followed'));
+    } else if (p.kind === 'pic') {
+      let files; try { files = f.getUploadedFiles('file'); } catch { files = null; }
+      const att = files && files.first ? files.first() : null;
+      if (att) { const bad = validateImage(att); if (bad) notice = `⚠️ ${bad}`; else draft.image = imageRecord(att); }
+    }
+    saveDraft(draft);
+    const payload = { components: [journalPanel(draft, i.guild, settings, { notice })] };
+    return i.isFromMessage() ? i.update(payload) : i.reply({ ...payload, ...ephemeral(payload.components[0]) });
+  }
+
+  async editPnl(i, threadId) {
+    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    const settings = getSettings(i.guildId), c = parseMoney(i.fields.getTextInputValue('pnl'));
+    if (c === null) return i.reply(ephemeral(card('That is not a valid amount.', 0xfbbf24)));
+    const cur = getPnlEntry(threadId);
+    const ch = await i.guild.channels.fetch(threadId).catch(() => null);
+    const date = cur?.date_local || (ch?.createdTimestamp ? require('luxon').DateTime.fromMillis(ch.createdTimestamp, { zone: settings.timezone }).toISODate() : null);
+    if (!ch || !date) return i.reply(ephemeral(card('Could not find that post.', 0xf87171)));
+    const outcome = cur?.outcome === 'missed' ? 'missed' : c > 0 ? 'win' : c < 0 ? 'loss' : 'be';
+    upsertPnl({ thread_id: threadId, guild_id: i.guildId, forum_id: ch.parentId, outcome, pnl_cents: c, potential_cents: cur?.potential_cents ?? null, date_local: date, source: 'manual' });
+    return i.reply(ephemeral(card(`Saved ${formatCents(c, { symbol: settings.currency })} for <#${threadId}>.\n-# Used in weekly and monthly images. The post text itself is unchanged.`)));
+  }
+}
+module.exports = { JournalModals };

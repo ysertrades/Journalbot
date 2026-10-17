@@ -1,0 +1,25 @@
+{
+  "name": "yser-journal-bot",
+  "version": "1.0.0",
+  "description": "Y$ER Journal Bot: Components V2 trade journaling into forums, PnL tracking, weekly and monthly PnL images",
+  "main": "src/index.js",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test tests/*.test.js",
+    "render-samples": "node scripts/render-samples.js"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.11",
+    "@sapphire/framework": "^5.5.1",
+    "better-sqlite3": "^13.0.3",
+    "discord.js": "^14.27.0",
+    "dotenv": "^18.0.8",
+    "luxon": "^3.7.2",
+    "node-cron": "^4.6.0"
+  }
+}
