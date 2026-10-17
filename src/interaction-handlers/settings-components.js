@@ -1,7 +1,9 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
 const { getSettings, saveSettings } = require('../lib/db');
-const { settingsPanel, simpleModal } = require('../lib/panels');
+const { settingsPanel, simpleModal, pickPanel } = require('../lib/panels');
+const { listPosts } = require('../lib/posts');
+const { OUTCOMES } = require('../lib/format');
 const { canConfigure, healthCheck } = require('../lib/permissions');
 const { scanGuild, summaryText } = require('../lib/scanner');
 const { weeklyImage, monthlyImage, postNow, reportMessage } = require('../lib/reports');
@@ -43,6 +45,37 @@ async function handleSettings(i) {
   }
 
   if (group === 'nav') { await i.deferUpdate(); return answer(action); }
+
+  // ---- destination picker: choose a forum, then an existing post inside it (or "new post each time") ----
+  const parts = i.customId.split(':');
+  const showPick = async (key, forumId, pg = 0) => {
+    const { forum, posts } = forumId ? await listPosts(i.guild, forumId) : { forum: null, posts: [] };
+    return i.editReply({ components: [pickPanel({ key, forumId: forum ? forumId : null, posts, page: pg, settings: getSettings(gid) })] });
+  };
+  if (group === 'outcomes' && action === 'edit') {
+    const key = parts[3]; if (!OUTCOMES[key]) return undefined;
+    await i.deferUpdate();
+    return showPick(key, s.outcome_threads?.[key]?.forum || s.outcome_forums?.[key] || s.default_forum_id || null, 0);
+  }
+  if (group === 'pick') {
+    const key = action, op = parts[3], forumId = parts[4], arg = parts[5]; if (!OUTCOMES[key]) return undefined;
+    await i.deferUpdate();
+    if (op === 'forum') return showPick(key, i.values[0], 0);
+    if (op === 'page') return showPick(key, forumId, Number(arg) || 0);
+    if (op === 'thread') {
+      saveSettings(gid, { outcome_threads: { ...s.outcome_threads, [key]: { thread: i.values[0], forum: forumId } }, outcome_forums: { ...s.outcome_forums, [key]: null } });
+      return showPick(key, forumId, Number(arg) || 0);
+    }
+    if (op === 'new') {
+      saveSettings(gid, { outcome_forums: { ...s.outcome_forums, [key]: forumId }, outcome_threads: { ...s.outcome_threads, [key]: null } });
+      return showPick(key, forumId, 0);
+    }
+    if (op === 'clear') {
+      saveSettings(gid, { outcome_forums: { ...s.outcome_forums, [key]: null }, outcome_threads: { ...s.outcome_threads, [key]: null } });
+      return answer('outcomes');
+    }
+    return undefined;
+  }
   const page = group;
   // modals open immediately (cannot defer first)
   const MODALS = {
@@ -57,7 +90,6 @@ async function handleSettings(i) {
   const ids = i.values || [];
   const patch = {
     general: { forums: { forums: ids }, defforum: { default_forum_id: ids[0] || null }, repchan: { report_channel_id: ids[0] || null } },
-    outcomes: action ? { [action]: { outcome_forums: { ...s.outcome_forums, [action]: ids[0] || null } } } : {},
     schedule: { toggle_weekly: { weekly_enabled: !s.weekly_enabled }, toggle_month: { month_enabled: !s.month_enabled }, day: { weekly_day: Number(ids[0] || s.weekly_day) } },
     advanced: { toggle_r: { show_r: !s.show_r }, role: { ping_role_id: ids[0] || null }, users: { allowed_users: ids } },
   }[page]?.[action];

@@ -6,7 +6,7 @@ const {
 } = require('discord.js');
 const { OUTCOMES, NEUTRAL_COLOR, findEmoji, emojiToken, buildPostBody } = require('./format');
 const { formatCents, formatR, formatDateDisplay } = require('./money');
-const { routeForum } = require('./routing');
+const { routeTarget } = require('./routing');
 
 const td = (c) => new TextDisplayBuilder().setContent(c);
 const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
@@ -68,8 +68,10 @@ function journalPanel(draft, guild, settings, { notice } = {}) {
     sec('Picture', draft.image ? `✅ ${draft.image.name}` : '⬜ None (shown above the journal text)', 'edit:pic', draft.image ? 'Replace' : 'Add', false),
   );
   c.addSeparatorComponents(sep());
-  const auto = routeForum(settings, draft.outcome);
-  c.addTextDisplayComponents(td(`**Post to forum**${draft.outcome && auto && !draft.fields._forum_manual ? `\n-# Auto-selected for ${meta.label}: <#${auto}>. Pick another to override.` : ''}`));
+  const auto = routeTarget(settings, draft.outcome);
+  const note = draft.outcome && auto && !draft.fields._forum_manual
+    ? `\n-# ${auto.threadId ? `Trades go into the existing ${meta.label} post <#${auto.threadId}>` : `New post in <#${auto.forumId}>`}. Pick a forum below to create a new post instead.` : '';
+  c.addTextDisplayComponents(td(`**Post to forum**${note}`));
   const sel = new ChannelSelectMenuBuilder().setCustomId(`jr:${id}:forum`).setPlaceholder('Select a forum channel')
     .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(1).setMaxValues(1);
   if (draft.forumId) sel.setDefaultChannels(draft.forumId);
@@ -168,6 +170,13 @@ function simpleModal(id, title, labelText, value, placeholder, max = 40) {
 /* ======================= SETTINGS PANEL ======================= */
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const mention = (ids) => (ids && ids.length ? ids.map((i) => `<#${i}>`).join(' ') : '*none*');
+function describeTarget(s, key) {
+  const t = s.outcome_threads?.[key];
+  if (t?.thread) return `Existing post <#${t.thread}>${t.forum ? ` in <#${t.forum}>` : ''}`;
+  if (s.outcome_forums?.[key]) return `New post each time in <#${s.outcome_forums[key]}>`;
+  return s.default_forum_id ? `*not set, uses default* <#${s.default_forum_id}>` : '*not set*';
+}
+
 const PAGES = [['general', 'General'], ['outcomes', 'Outcome forums'], ['schedule', 'Schedule'], ['advanced', 'Advanced']];
 
 function settingsPanel(page, s, healthLines) {
@@ -192,14 +201,10 @@ function settingsPanel(page, s, healthLines) {
     if (s.report_channel_id) r.setDefaultChannels(s.report_channel_id);
     c.addActionRowComponents(row(r));
   } else if (page === 'outcomes') {
-    c.addTextDisplayComponents(td('**Where each outcome is posted**\n-# /journal posts a Win to the Win forum, a Loss to the Loss forum, and so on. Outcomes without a forum use the default forum (General page).'));
+    c.addTextDisplayComponents(td('**Where each outcome is posted**\n-# Choose an existing post for each category (trades are added inside it), or a forum to create a new post each time. Anything not set uses the default forum.'));
     for (const o of Object.values(OUTCOMES)) {
-      const cur = s.outcome_forums?.[o.key];
-      c.addTextDisplayComponents(td(`${o.fallback} **${o.label} forum**\n${cur ? `<#${cur}>` : s.default_forum_id ? `*not set, uses default* <#${s.default_forum_id}>` : '*not set*'}`));
-      const m = new ChannelSelectMenuBuilder().setCustomId(`js:outcomes:${o.key}`).setPlaceholder(`Select the ${o.label} forum`)
-        .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(0).setMaxValues(1);
-      if (cur) m.setDefaultChannels(cur);
-      c.addActionRowComponents(row(m));
+      c.addSectionComponents(new SectionBuilder().addTextDisplayComponents(td(`${o.fallback} **${o.label}**\n${describeTarget(s, o.key)}`))
+        .setButtonAccessory(btn(`js:outcomes:edit:${o.key}`, 'Choose')));
     }
   } else if (page === 'schedule') {
     c.addTextDisplayComponents(td(`**Timezone:** \`${s.timezone}\``));
@@ -235,4 +240,40 @@ function settingsPanel(page, s, healthLines) {
   return c;
 }
 
-module.exports = { journalPanel, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS };
+const POST_PAGE = 25;
+/** Step-by-step destination picker for one outcome: 1) forum, 2) a post inside that forum (grouped by forum). */
+function pickPanel({ key, forumId, posts, page, settings }) {
+  const o = OUTCOMES[key], cur = settings.outcome_threads?.[key];
+  const pages = Math.max(1, Math.ceil(posts.length / POST_PAGE)), pg = Math.min(Math.max(page, 0), pages - 1);
+  const c = new ContainerBuilder().setAccentColor(o.color);
+  c.addTextDisplayComponents(td(`# ${o.label} destination\n-# Currently: ${describeTarget(settings, key)}`));
+  c.addSeparatorComponents(sep());
+  c.addTextDisplayComponents(td('**1. Forum**'));
+  const f = new ChannelSelectMenuBuilder().setCustomId(`js:pick:${key}:forum`).setPlaceholder('Select the forum')
+    .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(1).setMaxValues(1);
+  if (forumId) f.setDefaultChannels(forumId);
+  c.addActionRowComponents(row(f));
+  if (forumId) {
+    c.addTextDisplayComponents(td(`**2. Post in <#${forumId}>**\n-# ${posts.length ? `${posts.length} post${posts.length === 1 ? '' : 's'}, newest first${pages > 1 ? ` \u00b7 page ${pg + 1} of ${pages}` : ''}` : 'This forum has no posts yet. Use the button below to create a new post each time.'}`));
+    if (posts.length) {
+      const m = new StringSelectMenuBuilder().setCustomId(`js:pick:${key}:thread:${forumId}:${pg}`).setPlaceholder('Select the post to add trades to').setMinValues(1).setMaxValues(1)
+        .addOptions(posts.slice(pg * POST_PAGE, (pg + 1) * POST_PAGE).map((p) => ({
+          label: String(p.name).slice(0, 100) || 'Untitled', value: p.id, description: p.locked ? 'Locked' : p.archived ? 'Archived (will be reopened)' : undefined, default: cur?.thread === p.id,
+        })));
+      c.addActionRowComponents(row(m));
+      if (pages > 1) c.addActionRowComponents(row(
+        btn(`js:pick:${key}:page:${forumId}:${pg - 1}`, 'Previous', ButtonStyle.Secondary, { disabled: pg === 0 }),
+        btn(`js:pick:${key}:page:${forumId}:${pg + 1}`, 'Next', ButtonStyle.Secondary, { disabled: pg >= pages - 1 }),
+      ));
+    }
+  }
+  c.addSeparatorComponents(sep());
+  c.addActionRowComponents(row(
+    btn(`js:pick:${key}:new:${forumId || 'none'}`, 'New post each time', ButtonStyle.Primary, { disabled: !forumId }),
+    btn(`js:pick:${key}:clear`, 'Clear'),
+    btn('js:nav:outcomes', 'Back'),
+  ));
+  return c;
+}
+
+module.exports = { pickPanel, describeTarget, journalPanel, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS };

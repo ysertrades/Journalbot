@@ -8,7 +8,7 @@ const { getSettings, getPnlEntry } = require('../lib/db');
 const { canConfigure, isAllowed } = require('../lib/permissions');
 const { scanGuild, summaryText } = require('../lib/scanner');
 const { weeklyImage, monthlyImage, reportMessage } = require('../lib/reports');
-const { allForums } = require('../lib/routing');
+const { allForums, ledgerThreads } = require('../lib/routing');
 const { parseDateInput, formatCents } = require('../lib/money');
 const { card, ephemeral } = require('../lib/ui');
 
@@ -66,15 +66,17 @@ class PnlCommand extends Command {
 
   async contextMenuRun(interaction) {
     if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
-    const ch = interaction.targetMessage.channel;
+    const msg = interaction.targetMessage, ch = msg.channel;
     if (!ch?.isThread?.() || !ch.parent || ![15, 16].includes(ch.parent.type)) {
       return interaction.reply(ephemeral(card('Use this on a post inside a journal forum.', 0xfbbf24)));
     }
-    const cur = getPnlEntry(ch.id);
+    // a trade inside a destination post is keyed by its message; a one-trade post by the post itself
+    const key = ledgerThreads(getSettings(interaction.guildId))[ch.id] ? msg.id : ch.id;
+    const cur = getPnlEntry(key);
     const input = new TextInputBuilder().setCustomId('pnl').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(14)
       .setPlaceholder('1250  or  -480');
     if (cur) input.setValue(String(cur.pnl_cents / 100));
-    return interaction.showModal(new ModalBuilder().setCustomId(`jre:${ch.id}`).setTitle('Edit journal PnL')
+    return interaction.showModal(new ModalBuilder().setCustomId(`jre:${key}:${ch.id}`).setTitle('Edit journal PnL')
       .addLabelComponents(new LabelBuilder().setLabel('PnL (USD, signed)').setDescription('Overrides the number used in weekly/monthly images').setTextInputComponent(input)));
   }
 }

@@ -36,10 +36,10 @@ test('a database from the first release is upgraded in place', () => {
   assert.equal(JSON.parse(out[0]).default_forum_id, 'DEF'); assert.deepEqual(JSON.parse(out[1]), { win: 'W' });
 });
 
-test('settings has an Outcome forums page with one selector per outcome', () => {
+test('settings has an Outcome forums page with a Choose button per outcome', () => {
   const s = db.getSettings('g1');
   const j = JSON.stringify(settingsPanel('outcomes', s, []).toJSON());
-  for (const k of ['win', 'loss', 'be', 'missed']) assert.ok(j.includes(`js:outcomes:${k}`), k);
+  for (const k of ['win', 'loss', 'be', 'missed']) assert.ok(j.includes(`js:outcomes:edit:${k}`), k);
   assert.ok(j.includes('js:nav:outcomes'));
 });
 

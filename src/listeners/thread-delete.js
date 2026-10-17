@@ -1,9 +1,9 @@
 'use strict';
 const { Listener } = require('@sapphire/framework');
-const { deletePnl } = require('../lib/db');
+const { deletePnlByContainer } = require('../lib/db');
 
 class ThreadDelete extends Listener {
   constructor(ctx, o) { super(ctx, { ...o, event: 'threadDelete' }); }
-  run(thread) { if (thread?.id) deletePnl(thread.id); }
+  run(thread) { if (thread?.id) deletePnlByContainer(thread.id); }
 }
 module.exports = { ThreadDelete };

@@ -39,9 +39,10 @@ function parseText(text) {
  * Combine parsed text with forum tag outcome and thread timestamp into a PnL entry.
  * Returns null when the post has no PNL line AND is not a missed entry.
  */
-function resolveEntry(parsed, { tagOutcome = null, createdMs, tz }) {
-  let outcome = tagOutcome || parsed.outcome || null;
-  if (parsed.pnlCents === null && outcome !== 'missed') return null;
+function resolveEntry(parsed, { tagOutcome = null, hintOutcome = null, createdMs, tz }) {
+  const explicit = tagOutcome || parsed.outcome || null;                     // forum tag > heading in the text
+  let outcome = explicit || hintOutcome || null;                             // > the outcome this post is the destination for
+  if (parsed.pnlCents === null && explicit !== 'missed') return null;        // a message needs a PNL line or an explicit MISSED heading/tag
   let pnl = parsed.pnlCents ?? 0;
   if (!outcome) outcome = pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'be';
   if (outcome === 'win') pnl = Math.abs(pnl);

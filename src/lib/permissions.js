@@ -1,7 +1,7 @@
 'use strict';
 const { PermissionFlagsBits } = require('discord.js');
 const { getSettings } = require('./db');
-const { allForums } = require('./routing');
+const { allForums, ledgerThreads } = require('./routing');
 
 const owners = () => (process.env.OWNER_ID || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -29,14 +29,16 @@ const NEEDED = [
 async function healthCheck(guild, settings) {
   const lines = [];
   const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+  const newPostForums = new Set([...Object.values(settings.outcome_forums || {}), settings.default_forum_id].filter(Boolean));
   const check = async (id, kind) => {
     const ch = await guild.channels.fetch(id).catch(() => null);
     if (!ch) { lines.push(`⚠️ <#${id}>: channel not found`); return; }
     const perms = ch.permissionsFor(me);
-    const need = kind === 'report' ? NEEDED.filter(([n]) => ['ViewChannel', 'SendMessages', 'AttachFiles'].includes(n)) : NEEDED;
+    const only = { report: ['ViewChannel', 'SendMessages', 'AttachFiles'], post: ['ViewChannel', 'SendMessagesInThreads', 'AttachFiles', 'ReadMessageHistory', 'ManageThreads'] }[kind];
+    const need = only ? NEEDED.filter(([n]) => only.includes(n)) : NEEDED;
     const missing = need.filter(([, f]) => !perms?.has(f)).map(([n]) => n);
     let extra = '';
-    if (kind === 'forum') {
+    if (kind === 'forum' && newPostForums.has(id)) {     // tags only matter where the bot creates new posts
       const have = new Set((ch.availableTags || []).map((t) => t.name.toLowerCase()));
       const noTag = ['Win', 'Loss', 'Breakeven', 'Missed'].filter((n) => !have.has(n.toLowerCase()));
       if (noTag.length) extra = ` · missing tags: ${noTag.join(', ')}`;
@@ -44,6 +46,7 @@ async function healthCheck(guild, settings) {
     lines.push(missing.length || extra ? `⚠️ <#${id}>${missing.length ? ` missing ${missing.join(', ')}` : ''}${extra}` : `✅ <#${id}> permissions OK`);
   };
   for (const id of allForums(settings)) await check(id, 'forum');
+  for (const id of Object.keys(ledgerThreads(settings))) await check(id, 'post');
   if (settings.report_channel_id) await check(settings.report_channel_id, 'report');
   const names = ['ywin', 'yloss', 'ybe', 'ymissed'];
   const found = names.filter((n) => guild.emojis.cache.some((e) => e.name === n));

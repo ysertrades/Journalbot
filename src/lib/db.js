@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS journal_settings (
   show_r INTEGER NOT NULL DEFAULT 1,
   ping_role_id TEXT,
   allowed_users_json TEXT NOT NULL DEFAULT '[]',
-  outcome_forums_json TEXT NOT NULL DEFAULT '{}'
+  outcome_forums_json TEXT NOT NULL DEFAULT '{}',
+  outcome_threads_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS journal_drafts (
   draft_id TEXT PRIMARY KEY,
@@ -55,8 +56,11 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   forum_id TEXT, thread_id TEXT, message_id TEXT, image_name TEXT,
   created_at INTEGER NOT NULL
 );
+-- thread_id is the entry key: the post id for a one-trade-per-post entry, or the message id for a trade logged inside an existing post.
+-- container_id is the post (thread) the entry lives in.
 CREATE TABLE IF NOT EXISTS pnl_entries (
   thread_id TEXT PRIMARY KEY,
+  container_id TEXT,
   guild_id TEXT NOT NULL,
   forum_id TEXT NOT NULL,
   outcome TEXT NOT NULL,
@@ -82,16 +86,19 @@ CREATE TABLE IF NOT EXISTS report_log (
 `);
 
 // Additive migration: databases created before per-outcome forums existed
-if (!db.prepare("PRAGMA table_info(journal_settings)").all().some((c) => c.name === 'outcome_forums_json')) {
-  db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_forums_json TEXT NOT NULL DEFAULT '{}'");
-}
+const hasCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c);
+if (!hasCol('journal_settings', 'outcome_forums_json')) db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_forums_json TEXT NOT NULL DEFAULT '{}'");
+if (!hasCol('journal_settings', 'outcome_threads_json')) db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_threads_json TEXT NOT NULL DEFAULT '{}'");
+if (!hasCol('pnl_entries', 'container_id')) db.exec('ALTER TABLE pnl_entries ADD COLUMN container_id TEXT');
+db.exec('UPDATE pnl_entries SET container_id = thread_id WHERE container_id IS NULL');
+db.exec('CREATE INDEX IF NOT EXISTS idx_pnl_container ON pnl_entries (container_id)');
 
 const DEFAULTS = {
   forums: [], default_forum_id: null, report_channel_id: null,
   weekly_day: 5, weekly_time: '17:00', weekly_enabled: true,
   month_enabled: true, month_time: '17:00',
   timezone: 'America/New_York', currency: '$', show_r: true,
-  ping_role_id: null, allowed_users: [], outcome_forums: {},
+  ping_role_id: null, allowed_users: [], outcome_forums: {}, outcome_threads: {},
 };
 
 function rowToSettings(guildId, r) {
@@ -105,6 +112,7 @@ function rowToSettings(guildId, r) {
     timezone: r.timezone, currency: r.currency, show_r: !!r.show_r,
     ping_role_id: r.ping_role_id, allowed_users: JSON.parse(r.allowed_users_json || '[]'),
     outcome_forums: JSON.parse(r.outcome_forums_json || '{}'),
+    outcome_threads: JSON.parse(r.outcome_threads_json || '{}'),
   };
 }
 
@@ -117,20 +125,21 @@ function saveSettings(guildId, patch) {
   const n = { ...cur, ...patch };
   db.prepare(`INSERT INTO journal_settings
     (guild_id, forums_json, default_forum_id, report_channel_id, weekly_day, weekly_time, weekly_enabled,
-     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json)
+     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json, outcome_threads_json)
     VALUES (@guild_id,@forums_json,@default_forum_id,@report_channel_id,@weekly_day,@weekly_time,@weekly_enabled,
-     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json)
+     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json,@outcome_threads_json)
     ON CONFLICT(guild_id) DO UPDATE SET forums_json=excluded.forums_json, default_forum_id=excluded.default_forum_id,
      report_channel_id=excluded.report_channel_id, weekly_day=excluded.weekly_day, weekly_time=excluded.weekly_time,
      weekly_enabled=excluded.weekly_enabled, month_enabled=excluded.month_enabled, month_time=excluded.month_time,
      timezone=excluded.timezone, currency=excluded.currency, show_r=excluded.show_r, ping_role_id=excluded.ping_role_id,
-     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json`).run({
+     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json, outcome_threads_json=excluded.outcome_threads_json`).run({
     guild_id: guildId, forums_json: JSON.stringify(n.forums || []), default_forum_id: n.default_forum_id ?? null,
     report_channel_id: n.report_channel_id ?? null, weekly_day: n.weekly_day, weekly_time: n.weekly_time,
     weekly_enabled: n.weekly_enabled ? 1 : 0, month_enabled: n.month_enabled ? 1 : 0, month_time: n.month_time,
     timezone: n.timezone, currency: n.currency, show_r: n.show_r ? 1 : 0, ping_role_id: n.ping_role_id ?? null,
     allowed_users_json: JSON.stringify(n.allowed_users || []),
     outcome_forums_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_forums || {}).filter(([, v]) => v))),
+    outcome_threads_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_threads || {}).filter(([, v]) => v && v.thread))),
   });
   return getSettings(guildId);
 }
@@ -172,21 +181,25 @@ function insertEntry(e) {
      @potential_cents,@followed_plan,@fields_json,@date_local,@forum_id,@thread_id,@message_id,@image_name,@created_at)`).run(e);
 }
 function upsertPnl(e) {
-  db.prepare(`INSERT INTO pnl_entries (thread_id,guild_id,forum_id,outcome,pnl_cents,potential_cents,date_local,source,content_hash,updated_at)
-    VALUES (@thread_id,@guild_id,@forum_id,@outcome,@pnl_cents,@potential_cents,@date_local,@source,@content_hash,@updated_at)
-    ON CONFLICT(thread_id) DO UPDATE SET guild_id=excluded.guild_id, forum_id=excluded.forum_id, outcome=excluded.outcome,
+  db.prepare(`INSERT INTO pnl_entries (thread_id,container_id,guild_id,forum_id,outcome,pnl_cents,potential_cents,date_local,source,content_hash,updated_at)
+    VALUES (@thread_id,@container_id,@guild_id,@forum_id,@outcome,@pnl_cents,@potential_cents,@date_local,@source,@content_hash,@updated_at)
+    ON CONFLICT(thread_id) DO UPDATE SET container_id=excluded.container_id, guild_id=excluded.guild_id, forum_id=excluded.forum_id, outcome=excluded.outcome,
      pnl_cents=excluded.pnl_cents, potential_cents=excluded.potential_cents, date_local=excluded.date_local,
      source=excluded.source, content_hash=excluded.content_hash, updated_at=excluded.updated_at`)
-    .run({ potential_cents: null, content_hash: null, source: 'scan', ...e, updated_at: Date.now() });
+    .run({ potential_cents: null, content_hash: null, source: 'scan', container_id: e.thread_id, ...e, updated_at: Date.now() });
 }
 function getPnlEntry(threadId) { return db.prepare('SELECT * FROM pnl_entries WHERE thread_id = ?').get(threadId); }
 function deletePnl(threadId) { return db.prepare('DELETE FROM pnl_entries WHERE thread_id = ?').run(threadId).changes; }
 function pnlBetween(guildId, startISO, endISO) {
   return db.prepare('SELECT * FROM pnl_entries WHERE guild_id=? AND date_local>=? AND date_local<=? ORDER BY date_local').all(guildId, startISO, endISO);
 }
-function pnlThreadIdsForForum(guildId, forumId) {
-  return db.prepare('SELECT thread_id FROM pnl_entries WHERE guild_id=? AND forum_id=?').all(guildId, forumId).map((r) => r.thread_id);
+function pnlRowsForForum(guildId, forumId) {
+  return db.prepare('SELECT thread_id, container_id FROM pnl_entries WHERE guild_id=? AND forum_id=?').all(guildId, forumId);
 }
+function pnlKeysForContainer(containerId) {
+  return db.prepare('SELECT thread_id FROM pnl_entries WHERE container_id=?').all(containerId).map((r) => r.thread_id);
+}
+function deletePnlByContainer(containerId) { return db.prepare('DELETE FROM pnl_entries WHERE container_id = ?').run(containerId).changes; }
 
 /* ---------------- report log ---------------- */
 function claimReport(guildId, kind, periodKey) {
@@ -209,4 +222,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, pnlThreadIdsForForum, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
