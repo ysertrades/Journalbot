@@ -6,7 +6,7 @@ const { journalPanel, previewPanel, tradeModal, resultModal, notesModal, picture
 const { isAllowed } = require('../lib/permissions');
 const { postJournal } = require('../lib/poster');
 const { OUTCOMES } = require('../lib/format');
-const { card, ephemeral } = require('../lib/ui');
+const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 const { routeTarget } = require('../lib/routing');
 
 class JournalComponents extends InteractionHandler {
@@ -17,10 +17,10 @@ class JournalComponents extends InteractionHandler {
     return this.some({ id, action, arg });
   }
   async run(i, { id, action, arg }) {
-    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
     const draft = getDraft(id);
-    if (!draft) return i.reply(ephemeral(card('This journal panel expired. Run `/journal` again.', 0xfbbf24)));
-    if (draft.userId !== i.user.id) return i.reply(ephemeral(card('This panel belongs to someone else.', 0xf87171)));
+    if (!draft) return i.reply(ephemeral(card('This journal panel expired. Run `/journal` again.', WARN_COLOR)));
+    if (draft.userId !== i.user.id) return i.reply(ephemeral(card('This panel belongs to someone else.', ERROR_COLOR)));
     const settings = getSettings(i.guildId);
     const refresh = (notice) => i.update({ components: [journalPanel(draft, i.guild, settings, { notice })] });
 
@@ -43,7 +43,7 @@ class JournalComponents extends InteractionHandler {
         return await i.showModal({ pic: pictureModal, trade: tradeModal, result: resultModal, notes: notesModal }[arg](draft));
       } catch (e) {
         this.container.logger.error(`[journal] could not open ${arg} modal`, e);
-        return i.reply(ephemeral(card(`\u26A0\uFE0F Could not open that form: ${e.message}`, 0xf87171))).catch(() => {});
+        return i.reply(ephemeral(card(`\u26A0\uFE0F Could not open that form: ${e.message}`, ERROR_COLOR))).catch(() => {});
       }
     }
     if (action === 'forum') {

@@ -8,7 +8,7 @@ Discord journaling bot built on discord.js 14 and Sapphire. Everything is Compon
 - Weekly image (calendar, five weekdays, weekend folded into the total) is posted to a report channel at the day and time you choose.
 - Month-end image (every day of the month) is posted on the last day of the month.
 - `/journal-settings` opens a Components V2 settings panel (General / Outcome forums / Schedule / Advanced).
-- `/pnl week [date]`, `/pnl month [YYYY-MM]`, `/pnl rescan`.
+- `/pnl day [date]` (a 4:5 daily card: the day's PnL, every trade on "the tape" with a running-PnL step chart, and the week around it), `/pnl week [date]`, `/pnl month [YYYY-MM]`, `/pnl rescan`.
 - Message context menu **Edit journal PnL**: override the PnL of any journal post (used for the images, post text unchanged).
 
 It does not register or touch any `/settings` command.

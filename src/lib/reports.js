@@ -4,10 +4,11 @@ const {
 } = require('discord.js');
 const { DateTime } = require('luxon');
 const { getSettings, listConfiguredGuilds, claimReport, finishReport, getReport } = require('./db');
-const { weekData, monthData } = require('./pnl');
-const { renderWeekly, renderMonthly } = require('./renderer');
+const { weekData, monthData, dayData } = require('./pnl');
+const { renderWeekly, renderMonthly, renderDaily } = require('./renderer');
 const { scanGuild } = require('./scanner');
 const { formatDollars } = require('./money');
+const { totalColor } = require('./format');
 
 const GRACE_HOURS = 6;
 
@@ -23,8 +24,14 @@ function monthlyImage(guildId, year, month, settings) {
   return { buffer: renderMonthly(data), name: `monthly-pnl-${year}-${String(month).padStart(2, '0')}.png`, summary, data };
 }
 
+function dailyImage(guildId, isoDate, settings) {
+  const data = dayData(guildId, isoDate, settings.timezone, settings.currency);
+  const summary = `**${data.weekday}** · ${formatDollars(data.total, { symbol: settings.currency })} · ${data.count ? `${data.count} trade${data.count === 1 ? '' : 's'} · ${data.winRate}% win rate` : 'no trades logged'}`;
+  return { buffer: renderDaily(data), name: `daily-pnl-${isoDate}.png`, summary, data };
+}
+
 function reportMessage(img, settings, { late } = {}) {
-  const c = new ContainerBuilder().setAccentColor(img.data.total > 0 ? 0x34d399 : img.data.total < 0 ? 0xf87171 : 0xfbbf24);
+  const c = new ContainerBuilder().setAccentColor(totalColor(img.data.total));
   if (settings.ping_role_id) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`<@&${settings.ping_role_id}>`));
   c.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${img.name}`)));
   c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`${img.summary}${late ? '\n-# posted late (bot was offline at the scheduled time)' : ''}`));
@@ -107,4 +114,4 @@ async function tick(client) {
   } finally { ticking = false; }
 }
 
-module.exports = { weeklyImage, monthlyImage, postNow, sendReport, dueJobs, isDue, tick, reportMessage };
+module.exports = { weeklyImage, monthlyImage, dailyImage, postNow, sendReport, dueJobs, isDue, tick, reportMessage };

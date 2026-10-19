@@ -62,7 +62,7 @@ function fakePnl(sub, opts = {}) {
     options: { getSubcommand: () => sub, getString: (k) => opts[k] ?? null },
     reply: async (p) => { calls.push(['reply', p]); }, editReply: async (p) => { calls.push(['editReply', p]); } };
 }
-for (const sub of ['week', 'month', 'rescan']) {
+for (const sub of ['day', 'week', 'month', 'rescan']) {
   test(`/pnl ${sub} answers immediately, then edits the reply without flags`, async () => {
     const i = fakePnl(sub);
     await PnlCommand.prototype.chatInputRun.call({ container: { logger: { error: console.error } } }, i);
@@ -79,4 +79,10 @@ test('/pnl month with an invalid month reports the error instead of hanging', as
   const i = fakePnl('month', { month: 'nope' });
   await PnlCommand.prototype.chatInputRun.call({ container: { logger: { error() {} } } }, i);
   assert.equal(i.calls.at(-1)[0], 'editReply');
+});
+test('/pnl day with an unreadable date reports the error instead of hanging', async () => {
+  const i = fakePnl('day', { date: 'not a date' });
+  await PnlCommand.prototype.chatInputRun.call({ container: { logger: { error() {} } } }, i);
+  const last = i.calls.at(-1);
+  assert.equal(last[0], 'editReply'); assert.equal(last[1].files, undefined);
 });

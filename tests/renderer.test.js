@@ -4,7 +4,7 @@
 // a single trade, weekend trades, and six-row months.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { renderWeekly, renderMonthly } = require('../src/lib/renderer');
+const { renderWeekly, renderMonthly, renderDaily } = require('../src/lib/renderer');
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const size = (buf) => ({ w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) });
@@ -49,4 +49,19 @@ test('monthly: empty, six-row month (August 2026)', () => {
 });
 test('monthly: a single trading day', () => {
   isPng(renderMonthly(month(2026, 2, { 17: { pnl: -75, trades: 1, w: 0, l: 1, be: 0, missed: 0 } })), 2000);
+});
+
+const dayOf = (trades, extra = {}) => ({ weekday: 'Thursday', dateLabel: 'OCT 15, 2026', symbol: '$', trades, total: trades.reduce((s, t) => s + (t.outcome === 'missed' ? 0 : t.pnl), 0),
+  count: trades.filter((t) => t.outcome !== 'missed').length, w: 0, l: 0, be: 0, missed: 0, winRate: null, rSum: null, best: null,
+  week: NAMES.map((d, i) => ({ day: d, pnl: i * 100, trades: i ? 1 : 0, today: i === 3 })), weekTotal: 1000, ...extra });
+const isCard = (buf) => { assert.ok(buf.subarray(0, 8).equals(PNG)); const { w, h } = size(buf); assert.equal(w, 2160); assert.equal(h, 2700); };
+test('daily: a 4:5 card for a normal day', () => {
+  isCard(renderDaily(dayOf([{ outcome: 'win', pnl: 1240, instrument: 'NQ', direction: 'Long', r: 2.5, setup: 'sweep' }, { outcome: 'loss', pnl: -310, instrument: 'ES', direction: 'Short', r: -1 }, { outcome: 'missed', pnl: 0, potential: 900 }])));
+});
+test('daily: empty, missed-only, many trades and odd data still render 4:5', () => {
+  isCard(renderDaily(dayOf([])));
+  isCard(renderDaily(dayOf([{ outcome: 'missed', pnl: 0 }])));
+  isCard(renderDaily(dayOf(Array.from({ length: 14 }, (_, i) => ({ outcome: i % 2 ? 'loss' : 'win', pnl: i % 2 ? -50 : 120, instrument: 'A very long instrument name here' }))))); 
+  isCard(renderDaily({ trades: undefined, week: undefined }));
+  isCard(renderDaily(dayOf([{ outcome: 'win', pnl: 1234567 }], { symbol: '€', weekday: 'Wednesday' })));
 });

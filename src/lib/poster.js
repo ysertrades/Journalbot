@@ -2,7 +2,7 @@
 const {
   AttachmentBuilder, ChannelType, ContainerBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags, TextDisplayBuilder,
 } = require('discord.js');
-const { OUTCOMES, buildPostBody, threadTitle, emojiToken } = require('./format');
+const { OUTCOMES, TRADE_COLOR, buildPostBody, threadTitle, emojiToken } = require('./format');
 const { tagToOutcome } = require('./parse');
 const { insertEntry, upsertPnl } = require('./db');
 const { chunkText } = require('./text');
@@ -42,7 +42,8 @@ async function postJournal({ guild, draft, settings }) {
   if (outcome === 'missed') f.pnl_cents = 0;
   const body = buildPostBody(outcome, f, { emoji: emojiToken(guild, outcome), symbol: settings.currency, showR: settings.show_r }).slice(0, 3900);
   const file = draft.image ? await downloadImage(draft.image) : null;
-  const container = new ContainerBuilder().setAccentColor(OUTCOMES[outcome].color);
+  // The trade log is dark: the post's own emoji and heading carry the outcome.
+  const container = new ContainerBuilder().setAccentColor(TRADE_COLOR);
   if (file) container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${file.name}`)));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(body));
   const copy = () => (file ? new AttachmentBuilder(file.attachment, { name: file.name }) : null);
