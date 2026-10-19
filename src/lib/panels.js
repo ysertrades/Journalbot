@@ -120,6 +120,7 @@ function csvPreviewPanel(draft, guild, settings, imp, { sparkline }) {
   const ledger = [`✨ **${tr.length} new**`];
   if (imp.dupes) ledger.push(`♻️ ${imp.dupes} already imported`);
   if (manual.length) ledger.push(`✋ ${manual.length} already journaled by hand`);
+  if (imp.backfilled) ledger.push(`\u{1F527} ${imp.backfilled} older import${imp.backfilled === 1 ? '' : 's'} given time, size and hold`);
   const run = imp.lastRun;
   const since = run ? `\n-# \u{1F9ED} Last import <t:${Math.floor(run.at / 1000)}:R> · ${run.count} trade${run.count === 1 ? '' : 's'}${run.last_trade_at ? ` up to <t:${Math.floor(run.last_trade_at / 1000)}:f>` : ''}${seenAll ? '. Matching trades are skipped, only what\'s new is added.' : ''}` : '\n-# First import into this journal.';
   c.addTextDisplayComponents(td(`${ledger.join('  ·  ')}${since}${imp.withId ? '\n-# Matched by your broker\'s trade IDs' : seenAll ? '\n-# Matched by symbol, side, size and entry/exit time, so a re-export with rounding or fee changes still matches' : ''}`));
