@@ -2,7 +2,7 @@
 const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType, ContainerBuilder, LabelBuilder, ModalBuilder,
   RoleSelectMenuBuilder, SectionBuilder, SeparatorBuilder, SeparatorSpacingSize, StringSelectMenuBuilder, TextDisplayBuilder,
-  TextInputBuilder, TextInputStyle, UserSelectMenuBuilder, FileUploadBuilder,
+  TextInputBuilder, TextInputStyle, UserSelectMenuBuilder, FileUploadBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
 } = require('discord.js');
 const { OUTCOMES, NEUTRAL_COLOR, TRADE_COLOR, findEmoji, emojiToken, buildPostBody } = require('./format');
 const { formatCents, formatR, formatDateDisplay } = require('./money');
@@ -257,7 +257,8 @@ function describeTarget(s, key) {
   return s.default_forum_id ? `*not set, uses default* <#${s.default_forum_id}>` : '*not set*';
 }
 
-const PAGES = [['general', 'General'], ['outcomes', 'Outcome forums'], ['schedule', 'Schedule'], ['advanced', 'Advanced']];
+const PAGES = [['general', 'General'], ['outcomes', 'Outcome forums'], ['schedule', 'Schedule'], ['look', 'Appearance'], ['advanced', 'Advanced']];
+const SWATCH = 'theme-preview.png';
 
 function settingsPanel(page, s, healthLines) {
   const c = new ContainerBuilder().setAccentColor(NEUTRAL_COLOR);
@@ -286,6 +287,20 @@ function settingsPanel(page, s, healthLines) {
       c.addSectionComponents(new SectionBuilder().addTextDisplayComponents(td(`${o.fallback} **${o.label}**\n${describeTarget(s, o.key)}`))
         .setButtonAccessory(btn(`js:outcomes:edit:${o.key}`, 'Choose')));
     }
+  } else if (page === 'look') {
+    // the same day in both themes, the one in use ringed, then the three choices
+    const { THEME_CHOICES, resolveTheme, NIGHT_FROM, NIGHT_TO } = require('./theme');
+    c.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${SWATCH}`)));
+    c.addTextDisplayComponents(td('**Card theme**\n-# Every image the bot draws: `/pnl day`, `week` and `month`, `/trades`, and the weekly and month-end reports.'));
+    for (const [k, t] of Object.entries(THEME_CHOICES)) {
+      const on = (s.theme || 'light') === k;
+      c.addSectionComponents(new SectionBuilder().addTextDisplayComponents(td(`${t.emoji} **${t.label}**${on ? '  ·  in use' : ''}\n-# ${t.desc}`))
+        .setButtonAccessory(btn(`js:look:theme_${k}`, on ? 'Selected' : 'Use', on ? ButtonStyle.Success : ButtonStyle.Secondary, { disabled: on })));
+    }
+    const now = resolveTheme(s);
+    c.addSeparatorComponents(sep());
+    c.addTextDisplayComponents(td(`-# Cards drawn right now come out in **${now === 'dark' ? 'Night' : 'Studio'}**${s.theme === 'auto' ? `: Night runs ${NIGHT_FROM}:00 to ${String(NIGHT_TO).padStart(2, '0')}:00 in \`${s.timezone}\`` : ''}. The preview uses today's trades.`));
+    c.addActionRowComponents(row(btn('js:look:prev_day', 'Preview today'), btn('js:look:prev_week', 'Preview this week'), btn('js:look:prev_month', 'Preview this month')));
   } else if (page === 'schedule') {
     c.addTextDisplayComponents(td(`**Timezone:** \`${s.timezone}\``));
     c.addSectionComponents(new SectionBuilder().addTextDisplayComponents(td(`**Weekly report**\n-# ${DAYS[s.weekly_day - 1]} at ${s.weekly_time}`))
@@ -356,4 +371,4 @@ function pickPanel({ key, forumId, posts, page, settings }) {
   return c;
 }
 
-module.exports = { pickPanel, describeTarget, journalPanel, summaryTrade, summaryResult, summaryNotes, csvModal, csvPreviewPanel, csvProgressCard, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS };
+module.exports = { pickPanel, describeTarget, journalPanel, summaryTrade, summaryResult, summaryNotes, csvModal, csvPreviewPanel, csvProgressCard, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS, SWATCH };

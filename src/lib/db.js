@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS report_log (
 const hasCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c);
 if (!hasCol('journal_settings', 'outcome_forums_json')) db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_forums_json TEXT NOT NULL DEFAULT '{}'");
 if (!hasCol('journal_settings', 'outcome_threads_json')) db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_threads_json TEXT NOT NULL DEFAULT '{}'");
+if (!hasCol('journal_settings', 'theme')) db.exec("ALTER TABLE journal_settings ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'");
 if (!hasCol('pnl_entries', 'container_id')) db.exec('ALTER TABLE pnl_entries ADD COLUMN container_id TEXT');
 db.exec('UPDATE pnl_entries SET container_id = thread_id WHERE container_id IS NULL');
 db.exec('CREATE INDEX IF NOT EXISTS idx_pnl_container ON pnl_entries (container_id)');
@@ -101,8 +102,9 @@ const DEFAULTS = {
   weekly_day: 5, weekly_time: '17:00', weekly_enabled: true,
   month_enabled: true, month_time: '17:00',
   timezone: 'America/New_York', currency: '$', show_r: true,
-  ping_role_id: null, allowed_users: [], outcome_forums: {}, outcome_threads: {},
+  ping_role_id: null, allowed_users: [], outcome_forums: {}, outcome_threads: {}, theme: 'light',
 };
+const THEMES = ['light', 'dark', 'auto'];
 
 function rowToSettings(guildId, r) {
   if (!r) return { guild_id: guildId, ...DEFAULTS };
@@ -116,6 +118,7 @@ function rowToSettings(guildId, r) {
     ping_role_id: r.ping_role_id, allowed_users: JSON.parse(r.allowed_users_json || '[]'),
     outcome_forums: JSON.parse(r.outcome_forums_json || '{}'),
     outcome_threads: JSON.parse(r.outcome_threads_json || '{}'),
+    theme: THEMES.includes(r.theme) ? r.theme : 'light',
   };
 }
 
@@ -128,14 +131,14 @@ function saveSettings(guildId, patch) {
   const n = { ...cur, ...patch };
   db.prepare(`INSERT INTO journal_settings
     (guild_id, forums_json, default_forum_id, report_channel_id, weekly_day, weekly_time, weekly_enabled,
-     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json, outcome_threads_json)
+     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json, outcome_threads_json, theme)
     VALUES (@guild_id,@forums_json,@default_forum_id,@report_channel_id,@weekly_day,@weekly_time,@weekly_enabled,
-     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json,@outcome_threads_json)
+     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json,@outcome_threads_json,@theme)
     ON CONFLICT(guild_id) DO UPDATE SET forums_json=excluded.forums_json, default_forum_id=excluded.default_forum_id,
      report_channel_id=excluded.report_channel_id, weekly_day=excluded.weekly_day, weekly_time=excluded.weekly_time,
      weekly_enabled=excluded.weekly_enabled, month_enabled=excluded.month_enabled, month_time=excluded.month_time,
      timezone=excluded.timezone, currency=excluded.currency, show_r=excluded.show_r, ping_role_id=excluded.ping_role_id,
-     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json, outcome_threads_json=excluded.outcome_threads_json`).run({
+     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json, outcome_threads_json=excluded.outcome_threads_json, theme=excluded.theme`).run({
     guild_id: guildId, forums_json: JSON.stringify(n.forums || []), default_forum_id: n.default_forum_id ?? null,
     report_channel_id: n.report_channel_id ?? null, weekly_day: n.weekly_day, weekly_time: n.weekly_time,
     weekly_enabled: n.weekly_enabled ? 1 : 0, month_enabled: n.month_enabled ? 1 : 0, month_time: n.month_time,
@@ -143,6 +146,7 @@ function saveSettings(guildId, patch) {
     allowed_users_json: JSON.stringify(n.allowed_users || []),
     outcome_forums_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_forums || {}).filter(([, v]) => v))),
     outcome_threads_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_threads || {}).filter(([, v]) => v && v.thread))),
+    theme: THEMES.includes(n.theme) ? n.theme : 'light',
   });
   return getSettings(guildId);
 }

@@ -1,12 +1,13 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
 const { getSettings, saveSettings } = require('../lib/db');
-const { settingsPanel, simpleModal, pickPanel } = require('../lib/panels');
+const { AttachmentBuilder } = require('discord.js');
+const { settingsPanel, simpleModal, pickPanel, SWATCH } = require('../lib/panels');
 const { listPosts } = require('../lib/posts');
 const { OUTCOMES } = require('../lib/format');
 const { canConfigure, healthCheck } = require('../lib/permissions');
 const { scanGuild, summaryText } = require('../lib/scanner');
-const { weeklyImage, monthlyImage, postNow, reportMessage } = require('../lib/reports');
+const { weeklyImage, monthlyImage, dailyImage, themeSwatch, postNow, reportMessage } = require('../lib/reports');
 const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 const { DateTime } = require('luxon');
 
@@ -32,7 +33,15 @@ async function handleSettings(i) {
   if (!canConfigure(i)) return i.reply(ephemeral(card('You need **Manage Server** to change journal settings.', ERROR_COLOR)));
   const [ns, group, action] = i.customId.split(':'); // js:{group}:{action} | jsm:{page}:{field}
   const gid = i.guildId; let s = getSettings(gid);
-  const answer = async (page) => { s = getSettings(gid); return i.editReply({ components: [await render(i, page, s)] }); };
+  const answer = async (page) => {
+    s = getSettings(gid);
+    // the Appearance page carries its preview image; every other page drops it
+    let files = [];
+    if (page === 'look') { try { files = [new AttachmentBuilder(themeSwatch(gid, s), { name: SWATCH })]; } catch { files = []; } }
+    const panel = await render(i, page, s);
+    if (page === 'look' && !files.length) return i.editReply({ components: [settingsPanel('general', s)], files: [], attachments: [] });
+    return i.editReply({ components: [panel], files, attachments: [] });
+  };
 
   if (ns === 'jsm') { // modal submit: jsm:{page}:{field}
     const v = (i.fields.getTextInputValue('value') || '').trim(); let err = null;
@@ -92,10 +101,18 @@ async function handleSettings(i) {
     general: { forums: { forums: ids }, defforum: { default_forum_id: ids[0] || null }, repchan: { report_channel_id: ids[0] || null } },
     schedule: { toggle_weekly: { weekly_enabled: !s.weekly_enabled }, toggle_month: { month_enabled: !s.month_enabled }, day: { weekly_day: Number(ids[0] || s.weekly_day) } },
     advanced: { toggle_r: { show_r: !s.show_r }, role: { ping_role_id: ids[0] || null }, users: { allowed_users: ids } },
+    look: { theme_light: { theme: 'light' }, theme_dark: { theme: 'dark' }, theme_auto: { theme: 'auto' } },
   }[page]?.[action];
   if (patch) { saveSettings(gid, patch); return answer(page); }
 
-  if (page === 'advanced' && ['prev_week', 'prev_month', 'post_week', 'post_month', 'rescan'].includes(action)) {
+  if (page === 'look' && action === 'prev_day') {
+    try {
+      const img = dailyImage(gid, DateTime.now().setZone(s.timezone).toISODate(), s);
+      const msg = reportMessage(img, { ...s, ping_role_id: null });
+      return i.followUp({ components: msg.components, files: msg.files, flags: 64 | 32768 });
+    } catch (e) { return i.followUp(ephemeral(card(`⚠️ ${e.message}`, ERROR_COLOR))); }
+  }
+  if ((page === 'advanced' || page === 'look') && ['prev_week', 'prev_month', 'post_week', 'post_month', 'rescan'].includes(action)) {
     try {
       if (action === 'rescan') {
         const res = await scanGuild(i.guild, s, { force: false });
