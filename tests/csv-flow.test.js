@@ -79,3 +79,48 @@ test('a non-CSV file is refused back in the panel', async () => {
   await JournalModals.prototype.run.call(Object.create(JournalModals.prototype), i, { type: 'draft', id, kind: 'csv' });
   assert.match(flattenText(shown.components[0]), /isn't a CSV/);
 });
+
+test('a later export: old trades reworded (rounding, no seconds, no fees) are recognised; only the new ones import', async () => {
+  // same three trades as CSV above, exported again differently, plus two new trades from the next day
+  const LATER = [
+    'Symbol;Side;Qty;Entry Price;Entry Time;Exit Price;Exit Time;Net P&L',
+    'NQU6;Long;1;21480.00;2026-10-15 09:31;21510.00;2026-10-15 09:45;598.00',
+    'ESU6;Short;1;5912.00;2026-10-15 10:02;5920.00;2026-10-15 10:10;(402.00)',
+    'YMU6;Long;1;42000;2026-10-15 11:00;42000;2026-10-15 11:05;0',
+    'NQU6;Short;2;21600;2026-10-16 09:40;21580;2026-10-16 09:52;800',
+    'ESU6;Long;1;5930;2026-10-16 10:20;5926;2026-10-16 10:31;-200',
+  ].join('\n');
+  global.fetch = async () => ({ ok: true, text: async () => LATER });
+  const log = [], guild = fakeGuild(log), id = db.createDraft({ userId: 'u', guildId: 'gc' }).id;
+  // one of tomorrow's trades was already journaled by hand with /journal (not imported)
+  db.upsertPnl({ thread_id: 'HAND1', container_id: 'HAND1', guild_id: 'gc', forum_id: 'FW', outcome: 'win', pnl_cents: 80000, date_local: '2026-10-16', source: 'bot', updated_at: Date.now() });
+  db.insertEntry({ guild_id: 'gc', user_id: 'u', outcome: 'win', instrument: 'NQ', direction: 'Short', session: null, setup: null, entry: null, stop: null, target: null, exit: null,
+    r_multiple: null, pnl_cents: 80000, potential_cents: null, followed_plan: null, fields_json: '{}', date_local: '2026-10-16', forum_id: 'FW', thread_id: 'HAND1', message_id: 'HAND1', image_name: null, created_at: Date.now() });
+  let shown;
+  await JournalModals.prototype.run.call(Object.create(JournalModals.prototype), {
+    user: { id: 'u' }, guildId: 'gc', guild, memberPermissions: PERM, isFromMessage: () => true,
+    fields: { getUploadedFiles: () => ({ first: () => ({ name: 'week2.csv', size: LATER.length, url: 'x', contentType: 'text/csv' }) }), getTextInputValue: () => '' },
+    update: async (p) => { shown = p; } }, { type: 'draft', id, kind: 'csv' });
+  const preview = flattenText(shown.components[0]);
+  assert.match(preview, /1 new/); assert.match(preview, /3 already imported/); assert.match(preview, /1 already journaled by hand/);
+  assert.match(preview, /Last import/); assert.match(preview, /Include 1 hand-logged/);
+  assert.match(preview, /Import 1 trade\b/);
+
+  const edits = [], click = (action) => ({ customId: `jr:${id}:${action}`, user: { id: 'u' }, guildId: 'gc', guild, memberPermissions: PERM,
+    update: async (p) => edits.push(p), editReply: async (p) => edits.push(p), reply: async (p) => edits.push(p) });
+  const self = Object.create(JournalComponents.prototype, { container: { value: { logger: { error: console.error } } } });
+  await JournalComponents.prototype.run.call(self, click('csvgo'), { id, action: 'csvgo' });
+  assert.equal(log.length, 1, 'only the genuinely new trade was posted');
+  assert.match(flattenText(edits.at(-1).components[0]), /Imported 1 trade\b/);
+});
+
+test('classifyTrades: a broker trade id survives any change to the row', () => {
+  const { readTrades } = require('../src/lib/csv-import');
+  const { classifyTrades } = require('../src/interaction-handlers/journal-modals');
+  const a = readTrades('trade_id,symbol,side,pnl,exit_time\nT-77,NQ,long,500,2026-09-01 10:00\n', 'America/New_York').trades;
+  db.markImported('gid', a[0].keys, 'm1');
+  const b = readTrades('trade_id,symbol,side,pnl,exit_time\nT-77,NQ,long,495.5,2026-09-01 10:03:59\n', 'America/New_York').trades;
+  assert.equal(classifyTrades('gid', b).dupes, 1);
+  const c2 = readTrades('trade_id,symbol,side,pnl,exit_time\nT-78,NQ,long,495.5,2026-09-01 10:03:59\n', 'America/New_York').trades;
+  assert.equal(classifyTrades('gid', c2).fresh.length, 1);
+});

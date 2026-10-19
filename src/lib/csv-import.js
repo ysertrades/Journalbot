@@ -50,6 +50,7 @@ function parseCsv(text) {
 /* -------------------------------- columns -------------------------------- */
 const norm = (h) => String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
 const COLS = {
+  tradeId:   ['tradeid', 'id', 'roundtripid', 'positionid', 'positiongroup', 'ticket', 'dealid', 'tradenumber', 'tradeno', 'pairid'],
   symbol:    ['symbol', 'instrument', 'contract', 'ticker', 'market', 'product', 'contractname', 'root'],
   side:      ['side', 'direction', 'type', 'buysell', 'action', 'position', 'longshort', 'tradetype', 'entryside'],
   qty:       ['qty', 'quantity', 'size', 'contracts', 'lots', 'volume', 'paireqty', 'filledqty'],
@@ -187,10 +188,21 @@ function readTrades(text, tz) {
     const cents = Math.round(pnl * 100);
     const outcome = Math.abs(cents) < 1 ? 'be' : cents > 0 ? 'win' : 'loss';
     const hash = crypto.createHash('sha1').update([instrument, side, qty, entry, exit, tIn?.toMillis(), tOut?.toMillis() || tDay.toISODate(), cents].join('|')).digest('hex').slice(0, 20);
+    // Identity keys for spotting the same trade in a later export, which is rarely byte-identical:
+    //  id:  the broker's own trade id, when the file has one (strongest)
+    //  fp:  symbol + side + size + entry/exit times to the minute (survives rounding, fee changes, seconds dropped)
+    //  day: symbol + side + day + PnL to the dollar (for PnL-only files without times)
+    const H = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 20);
+    const ext = String(get('tradeId') || '').trim();
+    const minute = (d) => (d ? d.toUTC().toFormat("yyyy-MM-dd'T'HH:mm") : '');
+    const keys = [hash];
+    if (ext) keys.push(`id:${H(`${ext}|${instrument}`)}`);
+    if (tIn || tOut) keys.push(`fp:${H([instrument, side || '', qty !== null ? Math.abs(qty) : '', minute(tIn), minute(tOut)].join('|'))}`);
+    else keys.push(`day:${H([instrument, side || '', tDay.toISODate(), Math.round(cents / 100)].join('|'))}`);
     if (seen.has(hash)) return skipped.push({ row: rowNo, why: 'duplicate row in the file' });
     seen.add(hash);
     trades.push({
-      hash, outcome, instrument, direction: side || 'Long', qty: qty !== null ? Math.abs(qty) : null,
+      hash, keys, extId: ext || null, outcome, instrument, direction: side || 'Long', qty: qty !== null ? Math.abs(qty) : null,
       entry: fmtPrice(entry), exit: fmtPrice(exit), date: tDay.toISODate(), at: tDay.toMillis(),
       pnl_cents: cents, fee_cents: Math.round(feesTotal * 100), held: tIn && tOut ? duration(tOut.toMillis() - tIn.toMillis()) : null,
       sideGuessed: !side,
