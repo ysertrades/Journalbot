@@ -1,6 +1,6 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
-const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl, importedHashes, journaledOn, lastImportRun } = require('../lib/db');
+const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl, importedHashes, journaledOn, lastImportRun, backfillImported } = require('../lib/db');
 const { journalPanel, csvPreviewPanel } = require('../lib/panels');
 const { readTrades, sparkline } = require('../lib/csv-import');
 const { finderState, finderPanel, editorPanel } = require('../lib/trade-editor');
@@ -25,7 +25,7 @@ function classifyTrades(guildId, trades) {
     const k = pool.findIndex((p) => (!p.instrument || p.instrument.toUpperCase() === t.instrument) && Math.abs(p.pnl_cents - t.pnl_cents) <= tol);
     if (k >= 0) { pool.splice(k, 1); manual.push(t); } else fresh.push(t);   // each journal entry can only match one CSV trade
   }
-  return { fresh, manual, dupes: trades.length - notImported.length };
+  return { fresh, manual, dupes: trades.length - notImported.length, imported: trades.filter((t) => !notImported.includes(t)) };
 }
 const { isAllowed, canConfigure } = require('../lib/permissions');
 const { validateImage, imageRecord } = require('../lib/poster');
@@ -124,9 +124,11 @@ class JournalModals extends InteractionHandler {
     } catch (e) { return back(`⚠️ Could not download the file (${e.message}). Try again.`); }
     const r = readTrades(text, settings.timezone);
     if (r.error) return back(`⚠️ ${r.error}`);
-    const { fresh, dupes, manual } = classifyTrades(i.guildId, r.trades);
+    const { fresh, dupes, manual, imported } = classifyTrades(i.guildId, r.trades);
+    // trades imported before times, sizes and hold times were kept pick them up from this file
+    const backfilled = imported.length ? backfillImported(i.guildId, imported) : 0;
     let tag = ''; try { tag = (i.fields.getTextInputValue('tag') || '').replace(/[`\n]/g, '').trim().slice(0, 60); } catch { /* optional */ }
-    draft.fields._import = { file: name.slice(0, 60), format: r.format, trades: fresh, manual, dupes, skipped: r.skipped.slice(0, 200), truncated: !!r.truncated,
+    draft.fields._import = { file: name.slice(0, 60), format: r.format, trades: fresh, manual, dupes, backfilled, skipped: r.skipped.slice(0, 200), truncated: !!r.truncated,
       lastRun: lastImportRun(i.guildId), withId: r.trades.some((t) => t.extId) };
     draft.fields._import_tag = tag || undefined;
     saveDraft(draft);

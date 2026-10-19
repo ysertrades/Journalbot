@@ -588,6 +588,19 @@ const priceFmt = (v) => {
   return v == null || v === '' ? null : Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(v).slice(0, 10);
 };
 
+/** a drawn ∞ (lemniscate of Bernoulli) filling w×h from its top-left, in the weight of the bold numerals beside it */
+function infinitySign(ctx, x, y, w, h, color) {
+  const cx = x + w / 2, cy = y + h / 2, a = w / 2 - 3;
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 5.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = 0; i <= 120; i++) {
+    const t = (i / 120) * Math.PI * 2, d = 1 + Math.sin(t) ** 2;
+    const px = cx + (a * Math.cos(t)) / d, py = cy + ((a * Math.sin(t) * Math.cos(t)) / d) * (h / a) * 1.15;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath(); ctx.stroke(); ctx.restore();
+}
+
 function tradePages(data) {
   const n = (data.trades || []).length;
   return Math.max(1, Math.ceil(n / TR_PER_PAGE));
@@ -646,7 +659,10 @@ function renderTrades(data, page = 0) {
   const pf = data.profitFactor;
   const chips = [
     { k: 'WIN RATE', v: data.winRate == null ? '—' : `${data.winRate}%`, sub: data.count ? `${data.w}W · ${data.l}L${data.be ? ` · ${data.be}BE` : ''}` : null },
-    { k: 'PROFIT FACTOR', v: pf == null ? '—' : pf === Infinity ? '∞' : pf.toFixed(2), tone: pf == null ? null : pf >= 1 ? 'good' : 'bad' },
+    // no losses: the fonts have no ∞ glyph, so the sign is drawn, with a word on what it means
+    pf === Infinity
+      ? { k: 'PROFIT FACTOR', v: '', infinity: true, sub: 'NO LOSSES YET', tone: 'good' }
+      : { k: 'PROFIT FACTOR', v: pf == null ? '—' : pf.toFixed(2), tone: pf == null ? null : pf >= 1 ? 'good' : 'bad', sub: pf != null ? `${sym}${pf.toFixed(2)} PER ${sym}1 LOST` : null },
     { k: 'AVG WIN', v: data.avgWin == null ? '—' : formatDollars(data.avgWin, { symbol: sym }), tone: data.avgWin ? 'good' : null },
     { k: 'AVG LOSS', v: data.avgLoss == null ? '—' : formatDollars(data.avgLoss, { symbol: sym }), tone: data.avgLoss ? 'bad' : null },
     { k: 'BEST STREAK', v: data.streak ? `${data.streak} win${data.streak === 1 ? '' : 's'}` : '—' },
@@ -659,8 +675,11 @@ function renderTrades(data, page = 0) {
     rr(ctx, x + 0.5, chy + 0.5, chw - 1, 95, 22); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
     text(ctx, s.k, x + 20, chy + 18, { kind: 'mono', size: 12, color: C.grey, ls: 2.6 });
     const col = s.tone === 'good' ? OUT.win.deep : s.tone === 'bad' ? OUT.loss.deep : C.ink;
-    const sz = shrink(ctx, s.v, chw - 40, { size: 30, weight: 800, ls: -1 });
-    text(ctx, s.v, x + 20, chy + 40, { size: sz, weight: 800, color: col, ls: -sz * 0.03 });
+    if (s.infinity) infinitySign(ctx, x + 20, chy + 42, 56, 26, col);
+    else {
+      const sz = shrink(ctx, s.v, chw - 40, { size: 30, weight: 800, ls: -1 });
+      text(ctx, s.v, x + 20, chy + 40, { size: sz, weight: 800, color: col, ls: -sz * 0.03 });
+    }
     if (s.sub) text(ctx, s.sub, x + 20, chy + 76, { kind: 'mono', size: 12, color: C.soft });
   });
 
@@ -699,7 +718,16 @@ function renderTrades(data, page = 0) {
     text(ctx, 'log one with /journal, or upload a CSV from the journal panel', lx + lwid / 2, ly + ledgerH / 2 + 36, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.32)', align: 'center', ls: 1 });
   } else {
     // column heads, and the period's running PnL as a sparkline on the right
-    const COL = { idx: lx + 32, time: lx + 82, sym: lx + 180, size: lx + 470, px: lx + 560, held: lx + 900, r: lx + 1010, bar: lx + 1170, pnl: lx + lwid - 32 };
+    // columns with nothing to say on this page (no times, sizes, hold times or R logged) step aside, and the rest share the room
+    const has = {
+      time: slice.some((x) => x.time), size: slice.some((x) => x.qty), px: slice.some((x) => x.entry),
+      held: slice.some((x) => x.held), r: slice.some((x) => typeof x.r === 'number' && !Number.isNaN(x.r)),
+    };
+    const WIDTHS = [['time', 98], ['sym', 290], ['size', 90], ['px', 340], ['held', 110], ['r', 160]].filter(([k]) => k === 'sym' || has[k]);
+    const room = 1170 - 82, used = WIDTHS.reduce((s, [, w]) => s + w, 0), grow = Math.min(1.7, room / used);
+    const COL = { idx: lx + 32, bar: lx + 1170, pnl: lx + lwid - 32 };
+    let cx0 = lx + 82;
+    for (const [k, w] of WIDTHS) { COL[k] = cx0; cx0 += w * grow; }
     const hy = ly + 28;
     text(ctx, 'THE LEDGER', COL.idx, hy, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.55)', ls: 4 });
     const counted = trades.filter((x) => x.outcome !== 'missed');
@@ -711,7 +739,7 @@ function renderTrades(data, page = 0) {
       ctx.save(); ctx.shadowColor = `rgba(${t.rgb},.8)`; ctx.shadowBlur = 8 * SCALE; ctx.strokeStyle = t.hex; ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
       text(ctx, 'RUNNING', gx0 - 14, hy, { kind: 'mono', size: 12, color: 'rgba(255,255,255,.3)', align: 'right', ls: 3 });
     }
-    const heads = [[COL.time, grouped ? 'TIME' : 'TIME'], [COL.sym, 'SYMBOL'], [COL.size, 'SIZE'], [COL.px, 'ENTRY / EXIT'], [COL.held, 'HELD'], [COL.r, 'R']];
+    const heads = [['time', 'TIME'], ['sym', 'SYMBOL'], ['size', 'SIZE'], ['px', 'ENTRY / EXIT'], ['held', 'HELD'], ['r', 'R']].filter(([k]) => COL[k] !== undefined).map(([k, s]) => [COL[k], s]);
     const h2 = ly + 70;
     heads.forEach(([x, s]) => text(ctx, s, x, h2, { kind: 'mono', size: 11, color: 'rgba(255,255,255,.32)', ls: 2.4 }));
     text(ctx, 'PNL', COL.pnl, h2, { kind: 'mono', size: 11, color: 'rgba(255,255,255,.32)', align: 'right', ls: 2.4 });
@@ -738,7 +766,7 @@ function renderTrades(data, page = 0) {
       if (l.idx % 2 === 0) { rr(ctx, lx + 18, y + 4, lwid - 36, ROW - 8, 14); ctx.fillStyle = 'rgba(255,255,255,.025)'; ctx.fill(); }
       rr(ctx, lx + 18, y + 14, 4, ROW - 28, 2); ctx.fillStyle = oc.hex; ctx.fill();
       text(ctx, String(l.idx).padStart(2, '0'), COL.idx, cy - 8, { kind: 'mono', size: 14, color: 'rgba(255,255,255,.35)' });
-      text(ctx, tr.time || '—', COL.time, cy - 8, { kind: 'mono', size: 15, color: tr.time ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.25)' });
+      if (has.time) text(ctx, tr.time || '—', COL.time, cy - 8, { kind: 'mono', size: 15, color: tr.time ? 'rgba(255,255,255,.75)' : 'rgba(255,255,255,.25)' });
       const name = (tr.instrument || 'TRADE').toUpperCase().slice(0, 10);
       const nw = text(ctx, name, COL.sym, cy - 11, { size: 21, weight: 800, color: missed ? 'rgba(255,255,255,.55)' : '#ffffff', ls: -0.2 });
       const dir = tr.direction ? String(tr.direction).toUpperCase().slice(0, 5) : null;
@@ -748,9 +776,9 @@ function renderTrades(data, page = 0) {
         text(ctx, dir, COL.sym + nw + 21, cy - 5.5, { size: 11, weight: 700, color: long ? OUT.win.hex : OUT.loss.hex, ls: 1.6 });
       }
       if (tr.setup && !/^Imported from CSV$/.test(tr.setup)) text(ctx, String(tr.setup).slice(0, 26), COL.sym, cy + 14, { kind: 'mono', size: 11, color: 'rgba(255,255,255,.32)' });
-      text(ctx, tr.qty ? `${tr.qty}×` : '—', COL.size, cy - 8, { kind: 'mono', size: 15, color: tr.qty ? 'rgba(255,255,255,.7)' : 'rgba(255,255,255,.25)' });
+      if (has.size) text(ctx, tr.qty ? `${tr.qty}×` : '—', COL.size, cy - 8, { kind: 'mono', size: 15, color: tr.qty ? 'rgba(255,255,255,.7)' : 'rgba(255,255,255,.25)' });
       const e1 = priceFmt(tr.entry), e2 = priceFmt(tr.exit);
-      if (!e1) text(ctx, '—', COL.px, cy - 8, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.25)' });
+      if (!has.px) { /* no prices on this page */ } else if (!e1) text(ctx, '—', COL.px, cy - 8, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.25)' });
       else {
         const w1 = text(ctx, e1, COL.px, cy - 8, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.7)' });
         if (e2) {   // a drawn arrow (the mono font has no arrow glyph), tinted by the outcome
@@ -760,9 +788,9 @@ function renderTrades(data, page = 0) {
           text(ctx, e2, ax + 30, cy - 8, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.7)' });
         }
       }
-      text(ctx, tr.held || '—', COL.held, cy - 8, { kind: 'mono', size: 15, color: tr.held ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.25)' });
+      if (has.held) text(ctx, tr.held || '—', COL.held, cy - 8, { kind: 'mono', size: 15, color: tr.held ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.25)' });
       const rv = typeof tr.r === 'number' && !Number.isNaN(tr.r) ? `${tr.r > 0 ? '+' : ''}${Number(tr.r.toFixed(2))}R` : '—';
-      text(ctx, rv, COL.r, cy - 8, { kind: 'mono', size: 15, color: rv === '—' ? 'rgba(255,255,255,.25)' : oc.hex });
+      if (has.r) text(ctx, rv, COL.r, cy - 8, { kind: 'mono', size: 15, color: rv === '—' ? 'rgba(255,255,255,.25)' : oc.hex });
       // the PnL bar: from the centre line, right for green, left for red
       const half = 70, mid = COL.bar;
       ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(mid, cy - 12, 1, 24);
@@ -785,7 +813,8 @@ function renderTrades(data, page = 0) {
       text(ctx, `PAGE ${pg + 1} OF ${pages}  ·  TRADES ${pg * TR_PER_PAGE + 1}–${pg * TR_PER_PAGE + slice.length} OF ${trades.length}`, lx + lwid / 2, y + 22, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.45)', align: 'center', ls: 2.4 });
     }
   }
-  footer(ctx, H);
+  const traded = (data.symbols || []).map((s) => String(s.symbol).toUpperCase()).filter(Boolean).slice(0, 4);
+  footer(ctx, H, undefined, undefined, traded.length ? `${traded.join(' · ')} — NEW YORK` : undefined);
   return { buffer: canvas.toBuffer('image/png'), page: pg, pages };
 }
 

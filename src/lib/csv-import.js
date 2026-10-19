@@ -58,8 +58,11 @@ const COLS = {
   exit:      ['exitprice', 'exit', 'closeprice', 'avgexit', 'avgexitprice', 'priceclose', 'exitavg', 'avgcloseprice'],
   buyPrice:  ['buyprice', 'avgbuyprice', 'boughtprice'],
   sellPrice: ['sellprice', 'avgsellprice', 'soldprice'],
-  entryTime: ['entrytime', 'opentime', 'opened', 'openedat', 'entrydate', 'entrydatetime', 'timeopen', 'opendate', 'entrytimestamp', 'starttime'],
-  exitTime:  ['exittime', 'closetime', 'closed', 'closedat', 'exitdate', 'exitdatetime', 'timeclose', 'closedate', 'exittimestamp', 'endtime'],
+  entryTime: ['entrytime', 'opentime', 'opened', 'openedat', 'entrydate', 'entrydatetime', 'timeopen', 'opendate', 'entrytimestamp', 'starttime',
+    'timeopened', 'openedtime', 'opentimestamp', 'openat', 'entryat', 'opendatetime', 'entered', 'enteredat', 'entrytimeutc', 'opentimeutc'],
+  exitTime:  ['exittime', 'closetime', 'closed', 'closedat', 'exitdate', 'exitdatetime', 'timeclose', 'closedate', 'exittimestamp', 'endtime',
+    'timeclosed', 'closedtime', 'closetimestamp', 'closeat', 'exitat', 'closedatetime', 'exited', 'exitedat', 'exittimeutc', 'closetimeutc'],
+  duration:  ['duration', 'holdtime', 'holdingtime', 'timeinmarket', 'tradeduration', 'held', 'timeintrade', 'holdduration', 'durationsec', 'durationseconds', 'positionduration'],
   boughtTime:['boughttimestamp', 'boughttime', 'buytime', 'buydate'],
   soldTime:  ['soldtimestamp', 'soldtime', 'selltime', 'selldate'],
   date:      ['date', 'tradedate', 'day', 'time', 'timestamp', 'datetime'],
@@ -132,6 +135,20 @@ function duration(ms) {
   return h ? `${h}h ${m}m` : m ? `${m}m ${r}s` : `${r}s`;
 }
 
+/** a hold-time cell -> ms: "00:13:05", "13:05", "1h 2m 3s", "13m", "13 min", "785" (seconds) */
+function durationMs(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (!s) return null;
+  let m = /^(?:(\d+)\.)?(\d{1,3}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/.exec(s);          // [d.]hh:mm[:ss] or mm:ss
+  if (m) { const [, d, a, b, c] = m; const sec = c !== undefined ? (+a * 3600 + +b * 60 + +c) : (+a * 60 + +b); return (sec + (d ? +d * 86400 : 0)) * 1000 || null; }
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(parseFloat(s) * 1000) || null;
+  let total = 0, hit = false;
+  for (const [, n, u] of s.matchAll(/(\d+(?:\.\d+)?)\s*(d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b/g)) {
+    hit = true; total += parseFloat(n) * ({ d: 86400, h: 3600, m: 60, s: 1 })[u[0]];
+  }
+  return hit && total > 0 ? Math.round(total * 1000) : null;
+}
+
 /* -------------------------------- trades --------------------------------- */
 /**
  * @returns {{ trades, skipped: [{row, why}], format, columns, total }}
@@ -182,6 +199,10 @@ function readTrades(text, tz) {
       if (!tOut && bt && st) tOut = longFirst ? st : bt;
     }
     if (!side && entry !== null && exit !== null && pnl) side = (exit > entry) === (pnl > 0) ? 'Long' : 'Short';
+    // a hold-time column fills in whichever end is missing, for display only:
+    // identity keys below stay on the raw tIn / tOut so earlier imports still match
+    const durMs = durationMs(get('duration'));
+    const openAt = tIn || (durMs && tOut ? tOut.minus(durMs) : null);
     const tDay = tOut || tIn || when(get('date'), tz);
     if (!tDay) return skipped.push({ row: rowNo, why: 'no date' });
     const qty = num(get('qty'));
@@ -203,8 +224,8 @@ function readTrades(text, tz) {
     seen.add(hash);
     trades.push({
       hash, keys, extId: ext || null, outcome, instrument, direction: side || 'Long', qty: qty !== null ? Math.abs(qty) : null,
-      entry: fmtPrice(entry), exit: fmtPrice(exit), date: tDay.toISODate(), at: tDay.toMillis(), opened: tIn ? tIn.toMillis() : null,
-      pnl_cents: cents, fee_cents: Math.round(feesTotal * 100), held: tIn && tOut ? duration(tOut.toMillis() - tIn.toMillis()) : null,
+      entry: fmtPrice(entry), exit: fmtPrice(exit), date: tDay.toISODate(), at: tDay.toMillis(), opened: openAt ? openAt.toMillis() : null,
+      timed: !!(tIn || tOut), pnl_cents: cents, fee_cents: Math.round(feesTotal * 100), held: tIn && tOut ? duration(tOut.toMillis() - tIn.toMillis()) : durMs ? duration(durMs) : null,
       sideGuessed: !side,
     });
   });
@@ -218,7 +239,7 @@ function toFields(t, { tag } = {}) {
   const bits = [t.qty ? `${t.qty} contract${t.qty === 1 ? '' : 's'}` : null, t.exit ? `exit ${t.exit}` : null, t.held ? `held ${t.held}` : null, t.fee_cents ? `fees $${(t.fee_cents / 100).toFixed(2)}` : null];
   return {
     instrument: t.instrument, direction: t.direction, date: t.date, entry: t.entry || undefined, exit: t.exit || undefined,
-    pnl_cents: t.pnl_cents, _at: t.opened || t.at, _qty: t.qty || undefined, _held: t.held || undefined, setup: tag || 'Imported from CSV', why: `Imported · ${bits.filter(Boolean).join(' · ') || 'from your CSV'}`,
+    pnl_cents: t.pnl_cents, _at: t.opened || (t.timed !== false ? t.at : undefined), _qty: t.qty || undefined, _held: t.held || undefined, setup: tag || 'Imported from CSV', why: `Imported · ${bits.filter(Boolean).join(' · ') || 'from your CSV'}`,
   };
 }
 
@@ -230,4 +251,4 @@ function sparkline(values, width = 24) {
   return pts.map((v) => bars[hi === lo ? 3 : Math.round(((v - lo) / (hi - lo)) * 7)]).join('');
 }
 
-module.exports = { parseCsv, readTrades, toFields, sparkline, num, when, rootSymbol, sideOf, MAX_ROWS };
+module.exports = { parseCsv, readTrades, toFields, sparkline, num, when, rootSymbol, sideOf, durationMs, MAX_ROWS };

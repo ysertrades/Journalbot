@@ -37,5 +37,13 @@ const month = []; for (let d = 1; d <= 30; d++) { if ([3, 4, 10, 11, 17, 18, 24,
 const md = data('month', 'September', 'SEPTEMBER 2026', month);
 const r0 = renderTrades(md, 0); fs.writeFileSync(path.join(out, 'trades-month-p1.png'), r0.buffer);
 fs.writeFileSync(path.join(out, 'trades-month-last.png'), renderTrades(md, r0.pages - 1).buffer);
+// one clean win from an older CSV: no time, size, hold or R, and no losses (profit factor ∞)
+fs.writeFileSync(path.join(out, 'trades-one-win.png'), renderTrades(data('day', 'Today', 'MONDAY, OCT 19', [
+  T('2026-10-19', null, 'NQ', 'Long', 'win', 797, { qty: null, entry: '29872.88', exit: '29893', setup: '100K eval' }),
+])).buffer);
+// the same win after re-uploading the CSV: time, size and hold filled in
+fs.writeFileSync(path.join(out, 'trades-one-win-filled.png'), renderTrades(data('day', 'Today', 'MONDAY, OCT 19', [
+  T('2026-10-19', '09:42', 'NQ', 'Long', 'win', 797, { qty: 2, entry: '29872.88', exit: '29893', held: '6m 12s', setup: '100K eval' }),
+])).buffer);
 fs.writeFileSync(path.join(out, 'trades-empty.png'), renderTrades(data('week', 'This week', 'OCT 19 – 25, 2026', [])).buffer);
 console.log('pages in month:', r0.pages);

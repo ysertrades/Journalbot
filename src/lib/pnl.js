@@ -140,11 +140,15 @@ function tradesData(guildId, range, tz, symbol = '$', anchorISO = DateTime.now()
     const d = details[r.thread_id] || {};
     let f = {}; try { f = d.fields_json ? JSON.parse(d.fields_json) : {}; } catch { f = {}; }
     const at = Number(f._at) || null;           // the real trade time, known for imported trades
+    // older imports kept size and hold time only in their note: "Imported · 2 contracts · exit … · held 13m 5s"
+    const note = /^Imported\b/.test(f.why || '') ? f.why : '';
+    const qty = f._qty || (Number(/(\d+(?:\.\d+)?) contracts?\b/.exec(note)?.[1]) || null);
+    const held = f._held || /\bheld ((?:\d+[hms] ?)+)/.exec(note)?.[1]?.trim() || null;
     return {
       key: r.thread_id, date: r.date_local, outcome: r.outcome, pnl: r.outcome === 'missed' ? 0 : r.pnl_cents / 100,
       potential: r.potential_cents != null ? r.potential_cents / 100 : null,
       instrument: d.instrument || null, direction: d.direction || null, r: typeof d.r_multiple === 'number' ? d.r_multiple : null,
-      setup: d.setup || null, entry: d.entry || null, exit: d.exit || null, qty: f._qty || null, held: f._held || null,
+      setup: d.setup || null, entry: d.entry || null, exit: d.exit || null, qty, held,
       time: at ? DateTime.fromMillis(at, { zone: tz }).toFormat('HH:mm') : null,
       sort: `${r.date_local} ${at ? String(at).padStart(15, '0') : String(d.created_at || r.updated_at || 0).padStart(15, '0')}`,
     };

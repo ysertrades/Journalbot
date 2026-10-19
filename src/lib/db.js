@@ -219,6 +219,29 @@ function markImported(guildId, keys, messageId) {
   const ins = db.prepare('INSERT OR REPLACE INTO journal_imports (guild_id, hash, message_id, imported_at) VALUES (?,?,?,?)');
   for (const k of [].concat(keys)) ins.run(guildId, k, messageId || null, Date.now());
 }
+/**
+ * Trades imported before the journal kept their time, size and hold time get
+ * them now from a re-uploaded file: for each already-imported trade, fills
+ * only the details its journal row is missing (never overwrites). Returns how
+ * many trades gained something.
+ */
+function backfillImported(guildId, trades) {
+  const msgOf = db.prepare('SELECT message_id FROM journal_imports WHERE guild_id = ? AND hash = ? AND message_id IS NOT NULL');
+  const row = db.prepare('SELECT id, fields_json FROM journal_entries WHERE guild_id = ? AND message_id = ? ORDER BY id DESC LIMIT 1');
+  const upd = db.prepare('UPDATE journal_entries SET fields_json = ? WHERE id = ?');
+  let n = 0;
+  for (const t of trades) {
+    const msg = (t.keys || [t.hash]).map((k) => msgOf.get(guildId, k)?.message_id).find(Boolean);
+    const e = msg && row.get(guildId, msg);
+    if (!e) continue;
+    let f; try { f = JSON.parse(e.fields_json || '{}') || {}; } catch { continue; }
+    const add = { _at: t.opened || (t.timed ? t.at : undefined), _qty: t.qty || undefined, _held: t.held || undefined };
+    let changed = false;
+    for (const [k, v] of Object.entries(add)) if (v && (f[k] === undefined || f[k] === null || f[k] === '')) { f[k] = v; changed = true; }
+    if (changed) { upd.run(JSON.stringify(f), e.id); n += 1; }
+  }
+  return n;
+}
 /** the last import into this server: when, how many, and the latest trade it held */
 function lastImportRun(guildId) { return db.prepare('SELECT * FROM journal_import_runs WHERE guild_id = ? ORDER BY at DESC LIMIT 1').get(guildId) || null; }
 function recordImportRun(guildId, { count, lastTradeAt, file }) {
@@ -284,4 +307,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
