@@ -1,12 +1,18 @@
 'use strict';
 /**
- * PnL image renderer (weekly + monthly). Mirrors assets/reference/*.png.
- * All geometry lives in the LAYOUT constants below so nothing is hardcoded in the drawing code.
+ * PnL image renderer (weekly + monthly), in the studio look of the YSER
+ * landing page: a bright floor with a soft grid, an ink headline with a serif
+ * italic turn ("Week 42, in the green."), dark glass cards floating on the
+ * floor with soft shadows, white pills for the numbers, an ink equity curve,
+ * and the YSER trades sign-off.
+ *
+ * Same inputs and exports as before: renderWeekly(weekData) and
+ * renderMonthly(monthData) from pnl.js, each returning a PNG buffer.
  */
 const path = require('node:path');
 const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
 const { DateTime } = require('luxon');
-const { formatDollars, formatShort } = require('./money');
+const { formatDollars } = require('./money');
 
 const FD = path.join(__dirname, '..', '..', 'assets', 'fonts');
 let fontsReady = false;
@@ -22,21 +28,24 @@ function ensureFonts() {
 
 const SCALE = 2;
 const W = 1600;
-const PAD_X = 50, PAD_TOP = 56, PAD_BOTTOM = 38;
-const BASE_K = { inter: 0.864, mono: 0.86, serif: 0.8 }; // baseline offset inside a line-height:1 box
-const INNER_W = W - PAD_X * 2; // 1500
+const PAD = 56;
+const INNER_W = W - PAD * 2;
+const BASE_K = { inter: 0.864, mono: 0.86, serif: 0.8 }; // baseline inside a line-height:1 box
 
-const THEMES = {
-  win:  { a: '52,211,153',  hex: '#34d399', t1: '#86efac', g: '16,185,129', dark: '#020604', pill: '#04100a' },
-  loss: { a: '248,113,113', hex: '#f87171', t1: '#fca5a5', g: '239,68,68',  dark: '#060202', pill: '#100404' },
-  be:   { a: '251,191,36',  hex: '#fbbf24', t1: '#fde68a', g: '217,119,6',  dark: '#060502', pill: '#110d03' },
+/* the landing page's palette */
+const C = {
+  floor: '#f9fbfb', floor2: '#eef0f4', ink: '#15171c', ink2: '#2a2d36', grey: '#8b8b92', soft: '#5b5f6b',
+  line: 'rgba(26,33,51,.08)', card: '#0c0d10', card2: '#16181d', shadow: '26,33,51', blurple: '#5865f2',
 };
-const OUT = { win: '52,211,153', loss: '248,113,113', be: '251,191,36', none: '148,163,184' };
-const LABEL = { win: 'WIN', loss: 'LOSS', be: 'BREAKEVEN', none: 'NO TRADE' };
-const CARD_BG = '#050810';
-
-const themeFor = (total) => (total > 0 ? THEMES.win : total < 0 ? THEMES.loss : THEMES.be);
+/* outcome colours: bright on the dark cards, deeper on the light floor */
+const OUT = {
+  win:  { rgb: '60,207,122',  hex: '#3ccf7a', deep: '#159a52', word: 'WIN' },
+  loss: { rgb: '248,113,113', hex: '#f87171', deep: '#d33c3c', word: 'LOSS' },
+  be:   { rgb: '245,184,75',  hex: '#f5b84b', deep: '#b97a0c', word: 'BREAKEVEN' },
+  none: { rgb: '148,163,184', hex: '#94a3b8', deep: '#8b8b92', word: 'NO TRADE' },
+};
 const outcomeOf = (d) => (!d || d.trades === 0 ? 'none' : d.pnl > 0 ? 'win' : d.pnl < 0 ? 'loss' : 'be');
+const toneOf = (v) => (v > 0 ? 'win' : v < 0 ? 'loss' : 'be');
 
 /* ------------------------------ primitives ------------------------------ */
 function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
@@ -45,197 +54,249 @@ function font(ctx, kind, size, weight = 400, italic = false) {
   ctx.font = `${italic ? 'italic ' : ''}${weight} ${size}px ${fam}`;
 }
 function setLS(ctx, px) { ctx.letterSpacing = `${px}px`; }
-function measure(ctx, str, kind, size, weight, ls = 0, italic = false) {
+function measure(ctx, str, kind, size, weight = 400, ls = 0, italic = false) {
   font(ctx, kind, size, weight, italic); setLS(ctx, ls);
   const w = ctx.measureText(str).width; setLS(ctx, 0); return w;
 }
-/** draw text with its line-height:1 box TOP at `top` */
-function text(ctx, str, x, top, { kind = 'inter', size = 16, weight = 400, color = '#fff', align = 'left', ls = 0, italic = false, fill } = {}) {
+/** text with its line-height:1 box TOP at `top`; returns its width */
+function text(ctx, str, x, top, { kind = 'inter', size = 16, weight = 400, color = C.ink, align = 'left', ls = 0, italic = false } = {}) {
   font(ctx, kind, size, weight, italic); setLS(ctx, ls);
   const w = ctx.measureText(str).width;
   const left = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x;
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = fill ? fill(left, w) : color;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = color;
   ctx.fillText(str, left, top + size * BASE_K[kind]);
   setLS(ctx, 0);
   return w;
 }
-function hgrad(ctx, x0, x1, stops) {
-  const g = ctx.createLinearGradient(x0, 0, x1, 0); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g;
-}
-function vgrad(ctx, y0, y1, stops) {
-  const g = ctx.createLinearGradient(0, y0, 0, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g;
-}
-function glowText(ctx, str, x, top, opts, glowRgb, glowAlpha, blur) {
-  ctx.save();
-  ctx.shadowColor = `rgba(${glowRgb},${glowAlpha})`; ctx.shadowBlur = blur * SCALE;
-  const w = text(ctx, str, x, top, opts);
-  ctx.restore(); return w;
-}
-function shrinkText(ctx, str, maxW, { kind, size, weight, ls = 0, min = 14 }) {
+function shrink(ctx, str, maxW, { kind = 'inter', size, weight = 800, ls = 0, min = 14 }) {
   let s = size;
   while (s > min && measure(ctx, str, kind, s, weight, ls) > maxW) s -= 2;
   return s;
 }
-function icon(ctx, kind, cx, cy, size, color, stroke = 3.4) {
+function shadowed(ctx, fn, { blur = 30, y = 18, alpha = 0.22 } = {}) {
+  ctx.save(); ctx.shadowColor = `rgba(${C.shadow},${alpha})`; ctx.shadowBlur = blur * SCALE; ctx.shadowOffsetY = y * SCALE; fn(); ctx.restore();
+}
+function icon(ctx, kind, cx, cy, size, color, stroke = 3.2) {
   const k = size / 24; ctx.save(); ctx.translate(cx - size / 2, cy - size / 2); ctx.scale(k, k);
   ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath();
-  if (kind === 'win') { ctx.moveTo(4, 12); ctx.lineTo(20, 12); ctx.moveTo(12, 4); ctx.lineTo(12, 20); }
-  else if (kind === 'loss') { ctx.moveTo(4, 12); ctx.lineTo(20, 12); }
-  else if (kind === 'be') { ctx.moveTo(5, 9); ctx.lineTo(19, 9); ctx.moveTo(5, 15); ctx.lineTo(19, 15); }
-  else { ctx.moveTo(6, 7); ctx.lineTo(11, 12); ctx.lineTo(6, 17); ctx.moveTo(13, 7); ctx.lineTo(18, 12); ctx.lineTo(13, 17); }
+  if (kind === 'win') { ctx.moveTo(6, 15); ctx.lineTo(12, 8); ctx.lineTo(18, 15); }
+  else if (kind === 'loss') { ctx.moveTo(6, 9); ctx.lineTo(12, 16); ctx.lineTo(18, 9); }
+  else if (kind === 'be') { ctx.moveTo(5, 10); ctx.lineTo(19, 10); ctx.moveTo(5, 15); ctx.lineTo(19, 15); }
+  else { ctx.moveTo(7, 12); ctx.lineTo(17, 12); }
   ctx.stroke(); ctx.restore();
 }
-/** rounded box with 2px gradient border (horizontal) and a fill painted inside it */
-function gradBorderBox(ctx, x, y, w, h, r, borderStops, fillFn, bw = 2) {
-  rr(ctx, x, y, w, h, r); ctx.fillStyle = hgrad(ctx, x, x + w, borderStops); ctx.fill();
-  rr(ctx, x + bw, y + bw, w - bw * 2, h - bw * 2, Math.max(0, r - bw)); ctx.fillStyle = fillFn(x + bw, w - bw * 2); ctx.fill();
-}
 
-/* ------------------------------- shared parts ------------------------------- */
-function background(ctx, t, H) {
-  ctx.fillStyle = t.dark; ctx.fillRect(0, 0, W, H);
-  // glows
-  const g1 = ctx.createRadialGradient(W * 0.9, -H * 0.008, 0, W * 0.9, -H * 0.008, 760);
-  g1.addColorStop(0, `rgba(${t.g},.38)`); g1.addColorStop(1, `rgba(${t.g},0)`);
-  ctx.save(); ctx.translate(W * 0.9, -8); ctx.scale(900 / 760, 520 / 760); ctx.translate(-W * 0.9, 8); ctx.fillStyle = g1; ctx.fillRect(-2000, -2000, 6000, 6000); ctx.restore();
-  ctx.save(); ctx.translate(W * 0.04, H * 1.08); ctx.scale(760 / 560, 420 / 560);
-  const g2 = ctx.createRadialGradient(0, 0, 0, 0, 0, 560); g2.addColorStop(0, `rgba(${t.g},.14)`); g2.addColorStop(1, `rgba(${t.g},0)`);
-  ctx.fillStyle = g2; ctx.fillRect(-3000, -3000, 6000, 6000); ctx.restore();
-  // grid: 200px, offset 50px
-  ctx.strokeStyle = `rgba(${t.a},.07)`; ctx.lineWidth = 1;
+/** a five-point star (drawn: the bundled fonts have no ★ glyph) */
+function star(ctx, cx, cy, r, color) {
   ctx.beginPath();
-  for (let x = 50; x < W; x += 200) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H); }
-  for (let y = 0; y < H; y += 200) { ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5); }
-  ctx.stroke();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5, rad = i % 2 ? r * 0.45 : r;
+    const px = cx + Math.cos(a) * rad, py = cy + Math.sin(a) * rad;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
 }
 
-function header(ctx, t, title, label, total, symbol, chip) {
-  const top = PAD_TOP, hh = 124;
-  const cy = top + hh / 2;
-  // pill
-  const wJ = measure(ctx, 'Journal', 'inter', 44, 500), wT = measure(ctx, title, 'inter', 44, 500);
-  const pillW = 40 + 38 + 26 + wJ + 26 + 3 + 26 + wT + 48, pillH = 96, px = PAD_X, py = cy - pillH / 2;
-  gradBorderBox(ctx, px, py, pillW, pillH, 48, [[0, t.hex], [1, `rgba(${t.a},.14)`]],
-    (x, w) => hgrad(ctx, x, x + w, [[0, t.pill], [1, 'rgba(4,10,8,.55)']]));
-  let cx = px + 40;
-  ctx.save(); ctx.strokeStyle = t.hex; ctx.lineWidth = 2.6 * (38 / 24); ctx.lineCap = 'round'; ctx.beginPath();
-  ctx.moveTo(cx + 3 * 38 / 24, cy); ctx.lineTo(cx + 21 * 38 / 24, cy); ctx.moveTo(cx + 19, cy - 19 + 3 * 38 / 24); ctx.lineTo(cx + 19, cy + 19 - 3 * 38 / 24);
-  ctx.stroke(); ctx.restore();
-  cx += 38 + 26;
-  text(ctx, 'Journal', cx, cy - 22, { size: 44, weight: 500, color: '#fff' }); cx += wJ + 26;
-  ctx.save(); ctx.shadowColor = 'rgba(255,255,255,.55)'; ctx.shadowBlur = 12 * SCALE; ctx.fillStyle = '#fff'; rr(ctx, cx, cy - 27, 3, 54, 1.5); ctx.fill(); ctx.restore();
-  cx += 3 + 26;
-  text(ctx, title, cx, cy - 22, { size: 44, weight: 500, fill: (l, w) => hgrad(ctx, l, l + w, [[0, '#fff'], [1, t.t1]]) });
-  // total block (right aligned)
-  const blockTop = top + (hh - (17 + 14 + 92)) / 2;
-  text(ctx, label, W - PAD_X, blockTop, { kind: 'mono', size: 17, color: 'rgba(255,255,255,.5)', align: 'right', ls: 5.1 });
+/* ------------------------------- the floor ------------------------------- */
+function floor(ctx, H) {
+  const g = ctx.createRadialGradient(W * 0.68, -40, 0, W * 0.68, -40, W * 0.95);
+  g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, C.floor); g.addColorStop(1, C.floor2);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // the soft grid, fading toward the edges
+  const grid = createCanvas(W, H), gx = grid.getContext('2d');
+  gx.strokeStyle = `rgba(${C.shadow},.06)`; gx.lineWidth = 1; gx.beginPath();
+  for (let x = 0; x <= W; x += 40) { gx.moveTo(x + 0.5, 0); gx.lineTo(x + 0.5, H); }
+  for (let y = 0; y <= H; y += 40) { gx.moveTo(0, y + 0.5); gx.lineTo(W, y + 0.5); }
+  gx.stroke();
+  gx.globalCompositeOperation = 'destination-in';
+  const m = gx.createRadialGradient(W * 0.62, H * 0.28, 0, W * 0.62, H * 0.28, W * 0.75);
+  m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(0.55, 'rgba(0,0,0,.55)'); m.addColorStop(1, 'rgba(0,0,0,0)');
+  gx.fillStyle = m; gx.fillRect(0, 0, W, H);
+  ctx.drawImage(grid, 0, 0, W, H);
+}
+
+/* --------------------------------- header -------------------------------- */
+/** pill, headline with its italic turn, and the total on the right */
+function header(ctx, { kicker, lead, total, label, chip, symbol, empty }) {
+  const t = OUT[toneOf(total)];
+  // the pill: ink tile with a live dot, then the kicker
+  const pillY = 46, pillH = 46, kw = measure(ctx, kicker, 'inter', 17, 600, 0.2);
+  const pillW = 12 + 26 + 12 + kw + 22;
+  shadowed(ctx, () => { rr(ctx, PAD, pillY, pillW, pillH, 23); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
+  rr(ctx, PAD + 0.5, pillY + 0.5, pillW - 1, pillH - 1, 23); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+  rr(ctx, PAD + 10, pillY + 10, 26, 26, 8); ctx.fillStyle = C.ink; ctx.fill();
+  ctx.fillStyle = empty ? OUT.none.hex : t.hex; ctx.beginPath(); ctx.arc(PAD + 23, pillY + 23, 4.5, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = `rgba(${empty ? OUT.none.rgb : t.rgb},.35)`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(PAD + 23, pillY + 23, 8, 0, Math.PI * 2); ctx.stroke();
+  text(ctx, kicker, PAD + 12 + 26 + 12, pillY + 15, { size: 17, weight: 600, color: C.ink2, ls: 0.2 });
+
+  // the headline: "Week 42," in ink, then the italic turn in grey
+  const turn = empty ? 'nothing logged.' : total > 0 ? 'in the green.' : total < 0 ? 'in the red.' : 'dead flat.';
+  const hy = 122, hs = 74;
+  const lw = text(ctx, `${lead},`, PAD, hy, { size: hs, weight: 800, ls: -hs * 0.045 });
+  text(ctx, turn, PAD + lw + 18, hy + hs * 0.08, { kind: 'serif', size: hs * 1.08, italic: true, color: C.grey, ls: -0.5 });
+  // a short underline in the outcome colour, under the italic word
+  const uw = measure(ctx, turn, 'serif', hs * 1.08, 400, -0.5, true);
+  ctx.fillStyle = empty ? `rgba(${OUT.none.rgb},.35)` : `rgba(${t.rgb},.55)`; rr(ctx, PAD + lw + 22, hy + hs + 12, Math.min(uw - 8, 220), 4, 2); ctx.fill();
+
+  // the total, right aligned
+  text(ctx, label, W - PAD, 56, { kind: 'mono', size: 15, color: C.grey, align: 'right', ls: 4 });
   const val = formatDollars(total, { symbol });
-  const vw = glowText(ctx, val, W - PAD_X, blockTop + 17 + 14, { size: 92, weight: 800, align: 'right', ls: -1.84, fill: (l, w) => hgrad(ctx, l, l + w, [[0, '#fff'], [1, t.t1]]) }, t.a, 0.45, 28);
-  if (chip) { // weekend chip left of the value
-    const label2 = `+ WEEKEND ${formatDollars(chip, { symbol })}`;
-    const cw = measure(ctx, label2, 'inter', 17, 600, 2.4) + 44, chx = W - PAD_X - vw - 34 - cw, chy = cy - 8;
-    const o = chip > 0 ? OUT.win : chip < 0 ? OUT.loss : OUT.be;
-    gradBorderBox(ctx, chx, chy, cw, 46, 23, [[0, `rgba(${o},.95)`], [1, `rgba(${o},.22)`]], () => CARD_BG);
-    text(ctx, label2, chx + 22, chy + 23 - 8.5, { size: 17, weight: 600, color: `rgb(${o})`, ls: 2.4 });
+  const vs = shrink(ctx, val, 560, { size: 104, weight: 800, ls: -4 });
+  const vw = text(ctx, val, W - PAD, 84, { size: vs, weight: 800, color: empty ? C.grey : t.deep, ls: -vs * 0.04, align: 'right' });
+  if (chip != null) {
+    const o = OUT[toneOf(chip)], s = `+ WEEKEND ${formatDollars(chip, { symbol })}`;
+    const cw = measure(ctx, s, 'inter', 15, 600, 1.6) + 36, cx = W - PAD - vw - 26 - cw, cy = 84 + vs * 0.36;
+    rr(ctx, cx, cy, cw, 40, 20); ctx.fillStyle = '#ffffff'; ctx.fill();
+    rr(ctx, cx + 0.5, cy + 0.5, cw - 1, 39, 20); ctx.strokeStyle = `rgba(${o.rgb},.55)`; ctx.lineWidth = 1.5; ctx.stroke();
+    text(ctx, s, cx + 18, cy + 13, { size: 15, weight: 600, color: o.deep, ls: 1.6 });
   }
 }
 
-function statusPill(ctx, o, x, y, label) {
-  const c = OUT[o], lw = measure(ctx, label, 'inter', 17, 600, 2.38);
-  const w = 18 + 22 + 14 + 2 + 14 + lw + 22, h = 46;
-  gradBorderBox(ctx, x, y, w, h, 23, [[0, `rgba(${c},.95)`], [1, `rgba(${c},.22)`]], () => '#05070c');
-  icon(ctx, o, x + 18 + 11, y + h / 2, 22, `rgb(${c})`);
-  ctx.fillStyle = '#fff'; ctx.fillRect(x + 18 + 22 + 14, y + h / 2 - 11, 2, 22);
-  text(ctx, label, x + 18 + 22 + 14 + 2 + 14, y + h / 2 - 8.5, { size: 17, weight: 600, color: '#fff', ls: 2.38 });
+/* ----------------------------- dark glass card ---------------------------- */
+function glassCard(ctx, x, y, w, h, r, o, { lift = true, faint = false } = {}) {
+  const c = OUT[o];
+  const body = () => { rr(ctx, x, y, w, h, r); ctx.fillStyle = C.card; ctx.fill(); };
+  if (lift) shadowed(ctx, body, { blur: 34, y: 20, alpha: faint ? 0.14 : 0.28 }); else body();
+  rr(ctx, x, y, w, h, r);
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, o === 'none' ? 'rgba(255,255,255,.035)' : `rgba(${c.rgb},.16)`); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fill();
+  // a lit top edge and a hairline
+  rr(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, r - 0.75); ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.save(); rr(ctx, x, y, w, h, r); ctx.clip();
+  const e = ctx.createLinearGradient(x, 0, x + w, 0);
+  e.addColorStop(0, 'rgba(255,255,255,0)'); e.addColorStop(0.5, o === 'none' ? 'rgba(255,255,255,.16)' : `rgba(${c.rgb},.85)`); e.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = e; ctx.fillRect(x + 18, y, w - 36, 2);
+  ctx.restore();
+}
+function outcomePill(ctx, o, x, y) {
+  const c = OUT[o], lw = measure(ctx, c.word, 'inter', 14, 600, 2);
+  const w = 12 + 20 + 8 + lw + 16, h = 34;
+  rr(ctx, x, y, w, h, 17); ctx.fillStyle = `rgba(${c.rgb},.13)`; ctx.fill();
+  rr(ctx, x + 0.5, y + 0.5, w - 1, h - 1, 17); ctx.strokeStyle = `rgba(${c.rgb},.4)`; ctx.lineWidth = 1; ctx.stroke();
+  icon(ctx, o, x + 12 + 10, y + h / 2, 18, c.hex, 3);
+  text(ctx, c.word, x + 12 + 20 + 8, y + h / 2 - 7, { size: 14, weight: 600, color: c.hex, ls: 2 });
 }
 
-/** cumulative line chart. pts: [{x, v}] in canvas coords; labelAll draws every value, otherwise only the last */
-function curve(ctx, t, top, height, pts, { labelAll, caption, x0 = PAD_X, x1 = W - PAD_X, symbol }) {
-  const base = top + height - 26, ytop = top + 44;
+/* ------------------------------ equity curve ------------------------------ */
+function curve(ctx, top, height, pts, { labelAll, caption, symbol, x0 = PAD, x1 = W - PAD }) {
+  text(ctx, caption, x0, top, { kind: 'mono', size: 14, color: C.grey, ls: 4 });
+  // the highest point sits low enough that its value tag clears the caption
+  const base = top + height - 18, ytop = top + 84;
   const vals = pts.map((p) => p.v), lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), rng = hi - lo || 1;
   const Y = (v) => base - ((v - lo) / rng) * (base - ytop);
   const zero = Y(0), ys = vals.map(Y);
-  text(ctx, caption, x0, top + 16 - 16 * 0.86 + 0, { kind: 'mono', size: 16, color: 'rgba(255,255,255,.38)', ls: 4 });
-  ctx.save(); ctx.setLineDash([6, 8]); ctx.strokeStyle = `rgba(${t.a},.28)`; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0, zero); ctx.lineTo(x1, zero); ctx.stroke(); ctx.restore();
-  // area
-  const minY = Math.min(...ys);
-  ctx.beginPath(); ctx.moveTo(pts[0].x, zero); pts.forEach((p, i) => ctx.lineTo(p.x, ys[i])); ctx.lineTo(pts[pts.length - 1].x, zero); ctx.closePath();
-  const ag = ctx.createLinearGradient(0, minY, 0, zero); ag.addColorStop(0, `rgba(${t.a},.30)`); ag.addColorStop(1, `rgba(${t.a},0)`);
-  ctx.fillStyle = ag; ctx.fill();
-  const path = () => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, ys[i]) : ctx.moveTo(p.x, ys[i]))); };
+  // the zero line
+  ctx.save(); ctx.setLineDash([4, 8]); ctx.strokeStyle = `rgba(${C.shadow},.22)`; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x0, zero); ctx.lineTo(x1, zero); ctx.stroke(); ctx.restore();
+  const last = vals[vals.length - 1], t = OUT[toneOf(last)];
+  // area: green above zero, red below, fading to the line
+  const area = () => { ctx.beginPath(); ctx.moveTo(pts[0].x, zero); pts.forEach((p, i) => ctx.lineTo(p.x, ys[i])); ctx.lineTo(pts[pts.length - 1].x, zero); ctx.closePath(); };
+  ctx.save(); area(); ctx.clip();
+  const up = ctx.createLinearGradient(0, ytop, 0, zero); up.addColorStop(0, `rgba(${OUT.win.rgb},.30)`); up.addColorStop(1, `rgba(${OUT.win.rgb},0)`);
+  ctx.fillStyle = up; ctx.fillRect(x0 - 20, ytop - 40, x1 - x0 + 40, zero - ytop + 40);
+  const dn = ctx.createLinearGradient(0, zero, 0, base); dn.addColorStop(0, `rgba(${OUT.loss.rgb},0)`); dn.addColorStop(1, `rgba(${OUT.loss.rgb},.28)`);
+  ctx.fillStyle = dn; ctx.fillRect(x0 - 20, zero, x1 - x0 + 40, base - zero + 40);
+  ctx.restore();
+  // the line itself, in ink
+  const line = () => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, ys[i]) : ctx.moveTo(p.x, ys[i]))); };
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  ctx.save(); ctx.shadowColor = `rgba(${t.a},.9)`; ctx.shadowBlur = 10 * SCALE; ctx.strokeStyle = `rgba(${t.a},.7)`; ctx.lineWidth = 6; path(); ctx.stroke(); ctx.restore();
-  if (pts.length > 1) {
-    ctx.strokeStyle = hgrad(ctx, pts[0].x, pts[pts.length - 1].x, [[0, `rgba(${t.a},.45)`], [1, t.t1]]); ctx.lineWidth = 4; path(); ctx.stroke();
-  }
+  if (pts.length > 1) { shadowed(ctx, () => { ctx.strokeStyle = C.ink; ctx.lineWidth = 3.5; line(); ctx.stroke(); }, { blur: 10, y: 6, alpha: 0.18 }); }
   pts.forEach((p, i) => {
-    if (!labelAll && i !== pts.length - 1) return;
-    ctx.fillStyle = t.hex; ctx.beginPath(); ctx.arc(p.x, ys[i], 7, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = `rgba(${t.a},.45)`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, ys[i], labelAll ? 13 : 14, 0, Math.PI * 2); ctx.stroke();
-    const s = formatDollars(p.v, { symbol });
-    text(ctx, s, p.x, ys[i] - 24 - 19 * 0.86 + 0, { kind: 'mono', size: 19, color: t.t1, align: labelAll ? 'center' : 'right' });
+    const isLast = i === pts.length - 1;
+    if (p.ghost || (!labelAll && !isLast)) return; // ghost: the $0 start, line only
+    const o = OUT[toneOf(p.v)];
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(p.x, ys[i], isLast ? 10 : 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = o.hex; ctx.beginPath(); ctx.arc(p.x, ys[i], isLast ? 4.5 : 3.5, 0, Math.PI * 2); ctx.fill();
+    // value tag: a small white pill above the point
+    const s = formatDollars(p.v, { symbol }), tw = measure(ctx, s, 'mono', 16) + 22;
+    let tx = labelAll ? p.x - tw / 2 : p.x - tw; tx = Math.max(x0, Math.min(x1 - tw, tx));
+    const ty = ys[i] - 52;
+    shadowed(ctx, () => { rr(ctx, tx, ty, tw, 30, 15); ctx.fillStyle = isLast ? C.ink : '#ffffff'; ctx.fill(); }, { blur: 12, y: 5, alpha: 0.12 });
+    text(ctx, s, tx + 11, ty + 8, { kind: 'mono', size: 16, color: isLast ? '#ffffff' : o.deep });
   });
 }
 
-function statsStrip(ctx, t, top, stats, symbol, valueSize) {
-  const n = stats.length, cw = INNER_W / n;
-  stats.forEach((s, i) => {
-    const x = PAD_X + i * cw, pad = i === 0 ? 0 : 28;
-    if (i) { ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(x, top, 1, valueSize === 40 ? 81 : 75); }
-    text(ctx, s.k, x + pad, top + 6, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.42)', ls: 3.9 });
-    const col = s.tone === 'good' ? '#86efac' : s.tone === 'bad' ? '#fca5a5' : '#fff';
-    text(ctx, s.v, x + pad, top + 6 + 15 + 14, { size: valueSize, weight: 600, color: col, ls: -valueSize * 0.01 });
+/* --------------------------------- stats --------------------------------- */
+function stats(ctx, top, list, h = 92) {
+  const n = list.length, gap = 14, cw = (INNER_W - gap * (n - 1)) / n;
+  list.forEach((s, i) => {
+    const x = PAD + i * (cw + gap);
+    shadowed(ctx, () => { rr(ctx, x, top, cw, h, 22); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 22, y: 10, alpha: 0.1 });
+    rr(ctx, x + 0.5, top + 0.5, cw - 1, h - 1, 22); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+    text(ctx, s.k, x + 22, top + 20, { kind: 'mono', size: 13, color: C.grey, ls: 3 });
+    const col = s.tone === 'good' ? OUT.win.deep : s.tone === 'bad' ? OUT.loss.deep : C.ink;
+    const vs = shrink(ctx, String(s.v), cw - 44, { size: 34, weight: 800, ls: -1 });
+    text(ctx, String(s.v), x + 22, top + 44, { size: vs, weight: 800, color: col, ls: -vs * 0.03 });
   });
 }
 
+/* --------------------------------- footer -------------------------------- */
 function footer(ctx, H) {
-  const base = H - PAD_BOTTOM - 6;
-  ctx.textBaseline = 'alphabetic'; font(ctx, 'mono', 18); setLS(ctx, 6.12); ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.textAlign = 'left';
-  ctx.fillText('NQ \u00b7 ES \u00b7 YM \u2014 NEW YORK', PAD_X, base); setLS(ctx, 0);
-  const wT = measure(ctx, 'trades', 'serif', 32, 400, 0, true);
-  font(ctx, 'serif', 32, 400, true); ctx.fillStyle = hgrad(ctx, W - PAD_X - wT, W - PAD_X, [[0, '#fff'], [1, '#aab4cf']]);
-  ctx.fillText('trades', W - PAD_X - wT, base);
-  const wY = measure(ctx, 'YSER', 'inter', 28, 800, -0.28);
-  font(ctx, 'inter', 28, 800); setLS(ctx, -0.28); ctx.fillStyle = '#fff'; ctx.fillText('YSER', W - PAD_X - wT - 10 - wY, base); setLS(ctx, 0);
+  const base = H - 40;
+  ctx.fillStyle = `rgba(${C.shadow},.08)`; ctx.fillRect(PAD, base - 44, INNER_W, 1);
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  font(ctx, 'mono', 15); setLS(ctx, 5); ctx.fillStyle = C.grey;
+  ctx.fillText('NQ · ES · YM — NEW YORK', PAD, base); setLS(ctx, 0);
+  const wT = measure(ctx, 'trades', 'serif', 34, 400, 0, true);
+  font(ctx, 'serif', 34, 400, true); ctx.fillStyle = C.grey; ctx.fillText('trades', W - PAD - wT, base + 2);
+  const wY = measure(ctx, 'YSER', 'inter', 28, 800, -1);
+  font(ctx, 'inter', 28, 800); setLS(ctx, -1); ctx.fillStyle = C.ink; ctx.fillText('YSER', W - PAD - wT - 10 - wY, base); setLS(ctx, 0);
 }
 
 /* ------------------------------- WEEKLY ------------------------------- */
-const WK = { H: 1000, cardsTop: 220, cardH: 330, gap: 18, chartTop: 580, chartH: 190, statsTop: 790 };
+const WK = { cardsTop: 262, cardH: 300, gap: 20, chartTop: 616, chartH: 176, statsTop: 822, H: 1060 };
 
 function renderWeekly(week) {
   ensureFonts();
-  const t = themeFor(week.total), sym = week.symbol || '$';
+  const sym = week.symbol || '$';
   const canvas = createCanvas(W * SCALE, WK.H * SCALE), ctx = canvas.getContext('2d');
   ctx.scale(SCALE, SCALE);
-  background(ctx, t, WK.H);
-  header(ctx, t, 'Weekly PnL', `WEEK TOTAL \u00b7 ${week.rangeLabel}`, week.total, sym, week.weekend ? week.weekend.pnl : null);
-
-  const cw = (INNER_W - 4 * WK.gap) / 5;
-  week.days.forEach((d, i) => {
-    const o = outcomeOf(d), c = OUT[o], x = PAD_X + i * (cw + WK.gap), y = WK.cardsTop;
-    rr(ctx, x, y, cw, WK.cardH, 30); ctx.fillStyle = CARD_BG; ctx.fill();
-    rr(ctx, x, y, cw, WK.cardH, 30); ctx.fillStyle = vgrad(ctx, y, y + WK.cardH, [[0, `rgba(${c},.13)`], [1, `rgba(${c},.025)`]]); ctx.fill();
-    rr(ctx, x + 1, y + 1, cw - 2, WK.cardH - 2, 29); ctx.strokeStyle = `rgba(${c},.5)`; ctx.lineWidth = 2; ctx.stroke();
-    const ix = x + 2 + 26, iw = cw - 4 - 52, innerTop = y + 2 + 28;
-    text(ctx, d.day, ix, innerTop, { kind: 'mono', size: 22, color: `rgb(${c})`, ls: 6.6 });
-    text(ctx, d.date, ix + iw, innerTop + 22 * 0.86 - 20 * 0.86, { kind: 'mono', size: 20, color: 'rgba(255,255,255,.45)', align: 'right' });
-    const free = (WK.cardH - 4 - 28 - 26 - 22 - 58 - 79) / 2;
-    const val = o === 'none' ? '\u2014' : formatDollars(d.pnl, { symbol: sym });
-    const vs = shrinkText(ctx, val, iw, { kind: 'inter', size: 58, weight: 800, ls: -1.16 });
-    const vtop = innerTop + 22 + free + (58 - vs) / 2;
-    if (o === 'none') text(ctx, val, ix, vtop, { size: vs, weight: 800, color: 'rgba(255,255,255,.25)', ls: -1.16 });
-    else glowText(ctx, val, ix, vtop, { size: vs, weight: 800, color: `rgb(${c})`, ls: -1.16 }, c, 0.35, 30);
-    const cbTop = innerTop + 22 + free + 58 + free;
-    statusPill(ctx, o, ix, cbTop, LABEL[o]);
-    const tally = o === 'none' ? '0 trades' : `${d.w}W \u00b7 ${d.l}L${d.be ? ` \u00b7 ${d.be}BE` : ''}`;
-    text(ctx, tally, ix, cbTop + 46 + 14, { kind: 'mono', size: 19, color: 'rgba(255,255,255,.5)', ls: 1.14 });
+  floor(ctx, WK.H);
+  const empty = !week.days.some((d) => d.trades > 0) && !(week.weekend && week.weekend.trades);
+  header(ctx, {
+    kicker: 'Journal · Weekly PnL', lead: week.weekNo ? `Week ${week.weekNo}` : 'This week',
+    total: week.total, label: `WEEK TOTAL · ${week.rangeLabel}`, chip: week.weekend ? week.weekend.pnl : null, symbol: sym, empty,
   });
 
-  let run = 0;
-  const pts = week.days.map((d, i) => { run += d.pnl; return { x: PAD_X + i * (cw + WK.gap) + cw / 2, v: run }; });
-  curve(ctx, t, WK.chartTop, WK.chartH, pts, { labelAll: true, caption: 'CUMULATIVE PNL', symbol: sym });
-  statsStrip(ctx, t, WK.statsTop, week.stats, sym, 40);
+  const cw = (INNER_W - 4 * WK.gap) / 5;
+  const traded = week.days.filter((d) => d.trades > 0);
+  const best = traded.length > 1 ? traded.reduce((a, b) => (b.pnl > a.pnl ? b : a)) : null;
+  const maxAbs = Math.max(1, ...week.days.map((d) => Math.abs(d.pnl)));
+  week.days.forEach((d, i) => {
+    const o = outcomeOf(d), c = OUT[o];
+    // the cards float at slightly different heights, like the landing page's
+    const x = PAD + i * (cw + WK.gap), y = WK.cardsTop + [0, 10, -4, 8, 2][i];
+    glassCard(ctx, x, y, cw, WK.cardH, 28, o, { faint: o === 'none' });
+    const ix = x + 24, iw = cw - 48;
+    text(ctx, d.day, ix, y + 26, { kind: 'mono', size: 17, color: o === 'none' ? 'rgba(255,255,255,.35)' : c.hex, ls: 5 });
+    text(ctx, d.date, x + cw - 24, y + 27, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.4)', align: 'right' });
+    if (best && d === best && best.pnl > 0) {
+      const bw = measure(ctx, 'BEST', 'inter', 11, 600, 2) + 22;
+      rr(ctx, x + cw / 2 - bw / 2, y - 13, bw, 26, 13); ctx.fillStyle = '#ffffff'; ctx.fill();
+      text(ctx, 'BEST', x + cw / 2, y - 5, { size: 11, weight: 600, color: C.ink, align: 'center', ls: 2 });
+    }
+    const val = o === 'none' ? '—' : formatDollars(d.pnl, { symbol: sym });
+    const vs = shrink(ctx, val, iw, { size: 54, weight: 800, ls: -1.6 });
+    text(ctx, val, ix, y + 92 + (54 - vs) / 2, { size: vs, weight: 800, color: o === 'none' ? 'rgba(255,255,255,.22)' : '#ffffff', ls: -vs * 0.03 });
+    // a bar showing the day's size against the week's biggest day
+    const bw = iw * (o === 'none' ? 0 : Math.max(0.05, Math.abs(d.pnl) / maxAbs));
+    rr(ctx, ix, y + 168, iw, 6, 3); ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fill();
+    if (bw) { rr(ctx, ix, y + 168, bw, 6, 3); ctx.fillStyle = c.hex; ctx.fill(); }
+    outcomePill(ctx, o, ix, y + 198);
+    const tally = o === 'none' ? (d.missed ? `${d.missed} missed` : 'no trades') : `${d.w}W · ${d.l}L${d.be ? ` · ${d.be}BE` : ''}${d.missed ? ` · ${d.missed}M` : ''}`;
+    text(ctx, tally, ix, y + 250, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.5)', ls: 1 });
+  });
+
+  if (traded.length) {
+    let run = 0;
+    const pts = week.days.map((d, i) => { run += d.pnl; return { x: PAD + i * (cw + WK.gap) + cw / 2, v: run }; });
+    curve(ctx, WK.chartTop, WK.chartH, pts, { labelAll: true, caption: 'CUMULATIVE PNL', symbol: sym });
+  } else {
+    text(ctx, 'CUMULATIVE PNL', PAD, WK.chartTop, { kind: 'mono', size: 14, color: C.grey, ls: 4 });
+    text(ctx, 'No trades logged this week', PAD, WK.chartTop + 70, { kind: 'serif', size: 40, italic: true, color: C.grey });
+  }
+  stats(ctx, WK.statsTop, week.stats || []);
   footer(ctx, WK.H);
   return canvas.toBuffer('image/png');
 }
@@ -243,83 +304,92 @@ function renderWeekly(week) {
 /* ------------------------------- MONTHLY ------------------------------- */
 function renderMonthly(month) {
   ensureFonts();
-  const sym = month.symbol || '$', t = themeFor(month.total);
-  const cal = []; // Monday-first weeks of date objects
-  let cur = DateTime.fromObject({ year: month.year, month: month.month, day: 1 }).startOf('week');
-  const last = DateTime.fromObject({ year: month.year, month: month.month, day: 1 }).endOf('month');
+  const sym = month.symbol || '$';
+  const first = DateTime.fromObject({ year: month.year, month: month.month, day: 1 });
+  const cal = []; // Monday-first weeks
+  let cur = first.startOf('week');
+  const last = first.endOf('month');
   while (cur <= last) { cal.push(Array.from({ length: 7 }, (_, i) => cur.plus({ days: i }))); cur = cur.plus({ weeks: 1 }); }
-  const rows = cal.length, CELL_H = 128, GAP = 12;
-  const gridTop = 245, gridH = rows * CELL_H + (rows - 1) * GAP;
-  const chartTop = gridTop + gridH + 36, chartH = 170, statsTop = chartTop + chartH + 20;
-  const H = statsTop + 75 + 78 + PAD_BOTTOM + 40;
+  const rows = cal.length, CELL_H = 118, GAP = 12;
+  const labelsTop = 262, gridTop = 300, gridH = rows * CELL_H + (rows - 1) * GAP;
+  const chartTop = gridTop + gridH + 44, chartH = 170, statsTop = chartTop + chartH + 26;
+  const H = statsTop + 92 + 120;
   const canvas = createCanvas(W * SCALE, H * SCALE), ctx = canvas.getContext('2d');
   ctx.scale(SCALE, SCALE);
-  background(ctx, t, H);
-  header(ctx, t, 'Monthly PnL', `MONTH TOTAL \u00b7 ${month.monthLabel}`, month.total, sym, null);
+  floor(ctx, H);
+  const data = month.data || {};
+  const empty = !Object.values(data).some((d) => d.trades > 0);
+  const monthName = first.setLocale('en').toFormat('LLLL');
+  header(ctx, { kicker: 'Journal · Monthly PnL', lead: monthName, total: month.total, label: `MONTH TOTAL · ${month.monthLabel}`, chip: null, symbol: sym, empty });
 
-  const unit = (INNER_W - 7 * GAP) / 8.2, colW = [...Array(7).fill(unit), unit * 1.2];
-  const colX = []; { let x = PAD_X; colW.forEach((w) => { colX.push(x); x += w + GAP; }); }
-  // weekday labels
-  ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN', 'WEEKLY'].forEach((n, i) => {
-    const col = i === 7 ? t.hex : i > 4 ? 'rgba(255,255,255,.28)' : 'rgba(255,255,255,.55)';
-    text(ctx, n, colX[i] + colW[i] / 2 + 2.55, 214, { kind: 'mono', size: 17, color: col, align: 'center', ls: 5.1 });
+  const unit = (INNER_W - 7 * GAP) / 8.25, colW = [...Array(7).fill(unit), unit * 1.25];
+  const colX = []; { let x = PAD; colW.forEach((w) => { colX.push(x); x += w + GAP; }); }
+  ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN', 'WEEK'].forEach((n, i) => {
+    text(ctx, n, colX[i] + colW[i] / 2 + 2, labelsTop, { kind: 'mono', size: 14, color: i === 7 ? C.ink : i > 4 ? 'rgba(139,139,146,.6)' : C.grey, align: 'center', ls: 4 });
   });
 
+  const traded = Object.keys(data).map(Number).filter((k) => data[k].trades > 0);
+  const best = traded.length > 1 ? traded.reduce((a, b) => (data[b].pnl > data[a].pnl ? b : a)) : null;
   let wkNo = 0;
   cal.forEach((week, r) => {
     const y = gridTop + r * (CELL_H + GAP); let wp = 0, wd = 0;
     week.forEach((dt, i) => {
       const x = colX[i], w = colW[i], inMonth = dt.month === month.month;
-      if (!inMonth) {
-        ctx.save(); ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = 2; rr(ctx, x + 1, y + 1, w - 2, CELL_H - 2, 19); ctx.stroke(); ctx.restore();
-        text(ctx, String(dt.day), x + 2 + 16, y + 2 + 14, { kind: 'mono', size: 19, color: 'rgba(255,255,255,.14)' });
+      const d = inMonth ? data[dt.day] : null, o = d ? outcomeOf(d) : 'none', weekend = i > 4;
+      if (!inMonth) { // outside the month: a dashed outline on the floor
+        ctx.save(); ctx.setLineDash([5, 7]); ctx.strokeStyle = `rgba(${C.shadow},.12)`; ctx.lineWidth = 1.2; rr(ctx, x + 1, y + 1, w - 2, CELL_H - 2, 18); ctx.stroke(); ctx.restore();
+        text(ctx, String(dt.day), x + 16, y + 14, { kind: 'mono', size: 15, color: 'rgba(139,139,146,.45)' });
         return;
       }
-      const d = month.data[dt.day], weekend = i > 4, o = d ? outcomeOf(d) : 'none';
       if (d && d.trades) { wp += d.pnl; wd += 1; }
-      if (weekend && !(d && d.trades)) {
-        rr(ctx, x, y, w, CELL_H, 20); ctx.fillStyle = '#03050a'; ctx.fill();
-        ctx.save(); rr(ctx, x, y, w, CELL_H, 20); ctx.clip(); ctx.strokeStyle = 'rgba(255,255,255,.025)'; ctx.lineWidth = 8;
-        for (let k = -CELL_H; k < w + CELL_H; k += 22.6) { ctx.beginPath(); ctx.moveTo(x + k, y + CELL_H); ctx.lineTo(x + k + CELL_H, y); ctx.stroke(); } ctx.restore();
-        rr(ctx, x + 1, y + 1, w - 2, CELL_H - 2, 19); ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = 2; ctx.stroke();
-        text(ctx, String(dt.day), x + 2 + 16, y + 2 + 14, { kind: 'mono', size: 19, color: 'rgba(255,255,255,.22)' });
+      if (o === 'none') { // an untraded day: a white card resting on the floor (weekends hatched)
+        rr(ctx, x, y, w, CELL_H, 18); ctx.fillStyle = weekend ? 'rgba(255,255,255,.55)' : '#ffffff'; ctx.fill();
+        if (weekend) {
+          ctx.save(); rr(ctx, x, y, w, CELL_H, 18); ctx.clip(); ctx.strokeStyle = `rgba(${C.shadow},.05)`; ctx.lineWidth = 6;
+          for (let k = -CELL_H; k < w + CELL_H; k += 18) { ctx.beginPath(); ctx.moveTo(x + k, y + CELL_H); ctx.lineTo(x + k + CELL_H, y); ctx.stroke(); }
+          ctx.restore();
+        }
+        rr(ctx, x + 0.5, y + 0.5, w - 1, CELL_H - 1, 18); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+        text(ctx, String(dt.day), x + 16, y + 14, { kind: 'mono', size: 15, color: weekend ? 'rgba(139,139,146,.6)' : C.grey });
+        if (!weekend) text(ctx, d && d.missed ? `${d.missed} missed` : '—', x + w / 2, y + CELL_H - 40, { kind: 'mono', size: 15, color: 'rgba(139,139,146,.7)', align: 'center' });
         return;
       }
+      // a traded day: a dark glass card lifted off the floor
       const c = OUT[o];
-      rr(ctx, x, y, w, CELL_H, 20); ctx.fillStyle = o === 'none' ? '#04060b' : CARD_BG; ctx.fill();
-      if (o !== 'none') { rr(ctx, x, y, w, CELL_H, 20); ctx.fillStyle = vgrad(ctx, y, y + CELL_H, [[0, `rgba(${c},.14)`], [1, `rgba(${c},.03)`]]); ctx.fill(); }
-      rr(ctx, x + 1, y + 1, w - 2, CELL_H - 2, 19); ctx.strokeStyle = o === 'none' ? 'rgba(255,255,255,.08)' : `rgba(${c},.45)`; ctx.lineWidth = 2; ctx.stroke();
-      text(ctx, String(dt.day), x + 2 + 16, y + 2 + 14, { kind: 'mono', size: 19, color: 'rgba(255,255,255,.5)' });
-      const label = o === 'none' ? '\u2014' : o === 'be' ? 'BE' : formatDollars(d.pnl, { symbol: sym });
-      const maxW = w - 24, sz = shrinkText(ctx, label, maxW, { kind: 'inter', size: 30, weight: o === 'none' ? 500 : 800, ls: -0.6 });
-      const ty = y + CELL_H - 2 - 22 - sz;
-      if (o === 'none') text(ctx, label, x + w / 2, ty, { size: sz, weight: 500, color: 'rgba(255,255,255,.2)', align: 'center', ls: -0.6 });
-      else glowText(ctx, label, x + w / 2, ty, { size: sz, weight: 800, color: `rgb(${c})`, align: 'center', ls: -0.6 }, c, 0.35, 22);
+      glassCard(ctx, x, y, w, CELL_H, 18, o, { lift: true });
+      text(ctx, String(dt.day), x + 16, y + 14, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.5)' });
+      ctx.fillStyle = c.hex; ctx.beginPath(); ctx.arc(x + w - 20, y + 22, 4.5, 0, Math.PI * 2); ctx.fill();
+      if (best !== null && dt.day === best && data[best].pnl > 0) star(ctx, x + w - 42, y + 22, 8, '#ffffff');
+      const label = o === 'be' ? 'BE' : formatDollars(d.pnl, { symbol: sym });
+      const sz = shrink(ctx, label, w - 24, { size: 28, weight: 800, ls: -0.8 });
+      text(ctx, label, x + w / 2, y + CELL_H - 22 - sz, { size: sz, weight: 800, color: c.hex, align: 'center', ls: -sz * 0.03 });
     });
-    // weekly capsule
+    // the week's total: an ink capsule
     wkNo += 1;
-    const wo = wd ? (wp > 0 ? 'win' : wp < 0 ? 'loss' : 'be') : 'none', wc = OUT[wo], x = colX[7], w = colW[7];
-    gradBorderBox(ctx, x, y, w, CELL_H, 64, [[0, `rgba(${wc},.95)`], [1, `rgba(${wc},.22)`]], () => '#05070c');
-    const top0 = y + (CELL_H - 87) / 2, cxm = x + w / 2;
-    text(ctx, `WEEK ${wkNo}`, cxm + 2.4, top0, { kind: 'mono', size: 16, color: 'rgba(255,255,255,.55)', align: 'center', ls: 4.8 });
-    const wl = wd ? formatDollars(wp, { symbol: sym }) : '\u2014';
-    const ws = shrinkText(ctx, wl, w - 40, { kind: 'inter', size: 34, weight: 800, ls: -0.68 });
-    text(ctx, wl, cxm, top0 + 27 + (34 - ws) / 2, { size: ws, weight: 800, color: `rgb(${wc})`, align: 'center', ls: -0.68 });
-    text(ctx, `${wd} trading day${wd === 1 ? '' : 's'}`, cxm, top0 + 72, { kind: 'mono', size: 15, color: 'rgba(255,255,255,.4)', align: 'center', ls: 0.9 });
+    const wo = wd ? toneOf(wp) : 'none', wc = OUT[wo], x = colX[7], w = colW[7];
+    shadowed(ctx, () => { rr(ctx, x, y, w, CELL_H, 30); ctx.fillStyle = C.ink; ctx.fill(); }, { blur: 26, y: 14, alpha: 0.22 });
+    ctx.save(); rr(ctx, x, y, w, CELL_H, 30); ctx.clip(); ctx.fillStyle = wo === 'none' ? 'rgba(255,255,255,.08)' : wc.hex; ctx.fillRect(x, y + CELL_H - 4, w, 4); ctx.restore();
+    const cx = x + w / 2;
+    text(ctx, `WEEK ${wkNo}`, cx + 2, y + 18, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.5)', align: 'center', ls: 4 });
+    const wl = wd ? formatDollars(wp, { symbol: sym }) : '—';
+    const ws = shrink(ctx, wl, w - 32, { size: 32, weight: 800, ls: -0.8 });
+    text(ctx, wl, cx, y + 44 + (32 - ws) / 2, { size: ws, weight: 800, color: wo === 'none' ? 'rgba(255,255,255,.3)' : wc.hex, align: 'center', ls: -ws * 0.03 });
+    text(ctx, `${wd} trading day${wd === 1 ? '' : 's'}`, cx, y + 86, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.42)', align: 'center', ls: 0.6 });
   });
 
-  // equity curve (one point per day that has trades)
-  const traded = Object.keys(month.data).map(Number).filter((d) => month.data[d].trades > 0).sort((a, b) => a - b);
+  // equity curve: one point per day that has trades
+  const sorted = traded.slice().sort((a, b) => a - b);
   let run = 0;
-  const vals = traded.map((d) => (run += month.data[d].pnl));
+  const vals = sorted.map((k) => (run += data[k].pnl));
   if (vals.length) {
-    const n = vals.length, pts = vals.map((v, i) => ({ x: PAD_X + (n === 1 ? INNER_W : (i * INNER_W) / (n - 1)), v }));
-    curve(ctx, t, chartTop, chartH, pts, { labelAll: false, caption: `EQUITY CURVE \u00b7 ${month.monthShort}`, symbol: sym });
+    // starts from $0 at the left, so even a single trading day reads as a line
+    const n = vals.length, pts = [{ x: PAD, v: 0, ghost: true }, ...vals.map((v, i) => ({ x: PAD + ((i + 1) * INNER_W) / n, v }))];
+    curve(ctx, chartTop, chartH, pts, { labelAll: false, caption: `EQUITY CURVE · ${month.monthShort}`, symbol: sym });
   } else {
-    text(ctx, `EQUITY CURVE \u00b7 ${month.monthShort}`, PAD_X, chartTop, { kind: 'mono', size: 16, color: 'rgba(255,255,255,.38)', ls: 4 });
-    text(ctx, 'No trades logged this month', PAD_X, chartTop + 80, { kind: 'mono', size: 18, color: 'rgba(255,255,255,.3)', ls: 2 });
+    text(ctx, `EQUITY CURVE · ${month.monthShort}`, PAD, chartTop, { kind: 'mono', size: 14, color: C.grey, ls: 4 });
+    text(ctx, 'No trades logged this month', PAD, chartTop + 80, { kind: 'serif', size: 40, italic: true, color: C.grey });
   }
-  statsStrip(ctx, t, statsTop, month.stats, sym, 34);
+  stats(ctx, statsTop, month.stats || []);
   footer(ctx, H);
   return canvas.toBuffer('image/png');
 }

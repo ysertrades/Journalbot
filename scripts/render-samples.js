@@ -11,7 +11,7 @@ function week(days, label, stats) {
   const trades = days.reduce((s, d) => s + d.trades, 0), wins = days.reduce((s, d) => s + d.w, 0), losses = days.reduce((s, d) => s + d.l, 0), be = days.reduce((s, d) => s + d.be, 0);
   const best = days.reduce((a, b) => (b.pnl > a.pnl ? b : a));
   const f = (v) => (v > 0 ? `+$${v.toLocaleString('en-US')}` : v < 0 ? `\u2212$${Math.abs(v).toLocaleString('en-US')}` : '$0');
-  return { kind: 'weekly', rangeLabel: label, days, weekend: null, total, symbol: '$', stats: [
+  return { kind: 'weekly', weekNo: 42, rangeLabel: label, days, weekend: null, total, symbol: '$', stats: [
     { k: 'WIN RATE', v: `${Math.round(100 * wins / trades)}%` }, { k: 'TRADES', v: String(trades) }, { k: 'W \u00b7 L \u00b7 BE', v: `${wins} \u00b7 ${losses} \u00b7 ${be}` },
     { k: 'MISSED', v: String(days.reduce((s, d) => s + d.missed, 0)) }, { k: 'BEST DAY', v: f(best.pnl), tone: best.pnl > 0 ? 'good' : 'bad' } ] };
 }
