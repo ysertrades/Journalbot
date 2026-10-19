@@ -45,10 +45,11 @@ const THEMES = {
     line: 'rgba(26,33,51,.08)', card: '#0c0d10', card2: '#16181d', shadow: '26,33,51', shadowK: 1, grid: '26,33,51', gridA: 0.06,
     paper: '#ffffff', paperDim: 'rgba(255,255,255,.55)', tile: '#15171c', capsule: '#15171c', blurple: '#5865f2', dark: false,
   },
+  // matte: flat surfaces in three steps of charcoal, hairlines instead of shadows
   dark: {
-    floor: '#0e1014', floor2: '#060709', glow: '#1c2029', ink: '#f2f3f6', ink2: '#d6d9e0', inkInv: '#0c0d10', grey: '#7c818d', soft: '#a3a9b5',
-    line: 'rgba(255,255,255,.075)', card: '#111318', card2: '#181b21', shadow: '0,0,0', shadowK: 2.4, grid: '255,255,255', gridA: 0.045,
-    paper: '#16191f', paperDim: 'rgba(22,25,31,.6)', tile: '#07080a', capsule: '#1f232b', blurple: '#7983ff', dark: true,
+    floor: '#0b0c0e', floor2: '#0b0c0e', glow: '#0b0c0e', ink: '#eeeff2', ink2: '#d4d6dc', inkInv: '#0b0c0e', grey: '#777b85', soft: '#9a9ea8',
+    line: 'rgba(255,255,255,.08)', card: '#131417', card2: '#191a1e', shadow: '0,0,0', shadowK: 0, grid: '255,255,255', gridA: 0.07,
+    paper: '#131417', paperDim: 'rgba(19,20,23,.5)', tile: '#0b0c0e', capsule: '#1b1c20', blurple: '#7983ff', dark: true,
   },
 };
 const C = { ...THEMES.light, aurora: null };
@@ -133,19 +134,16 @@ function star(ctx, cx, cy, r, color) {
 
 /* ------------------------------- the floor ------------------------------- */
 function floor(ctx, H, W = 1600) {
+  // Night is matte: one flat colour and a quiet, even dot grid, like dotted notebook paper
+  if (C.dark) {
+    ctx.fillStyle = C.floor; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = `rgba(${C.grid},${C.gridA})`;
+    for (let x = 40; x < W; x += 40) for (let y = 40; y < H; y += 40) ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
+    return;
+  }
   const g = ctx.createRadialGradient(W * 0.68, -40, 0, W * 0.68, -40, W * 0.95);
   g.addColorStop(0, C.glow); g.addColorStop(0.45, C.floor); g.addColorStop(1, C.floor2);
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  // Night: a faint aurora in the period's colour behind the headline, and a cool counter-glow low on the left
-  if (C.dark) {
-    const a = OUT[C.aurora && C.aurora !== 'none' ? C.aurora : 'none'];
-    const au = ctx.createRadialGradient(W * 0.8, -H * 0.05, 0, W * 0.8, -H * 0.05, Math.max(W, H) * 0.7);
-    au.addColorStop(0, `rgba(${a.rgb},${C.aurora && C.aurora !== 'none' ? 0.16 : 0.07})`); au.addColorStop(0.5, `rgba(${a.rgb},.04)`); au.addColorStop(1, `rgba(${a.rgb},0)`);
-    ctx.fillStyle = au; ctx.fillRect(0, 0, W, H);
-    const cg = ctx.createRadialGradient(-W * 0.1, H * 1.05, 0, -W * 0.1, H * 1.05, W * 0.7);
-    cg.addColorStop(0, 'rgba(88,101,242,.07)'); cg.addColorStop(1, 'rgba(88,101,242,0)');
-    ctx.fillStyle = cg; ctx.fillRect(0, 0, W, H);
-  }
   // the soft grid, fading toward the edges
   const grid = createCanvas(W, H), gx = grid.getContext('2d');
   gx.strokeStyle = `rgba(${C.grid},${C.gridA})`; gx.lineWidth = 1; gx.beginPath();
@@ -200,17 +198,22 @@ function header(ctx, { kicker, lead, total, label, chip, symbol, empty }) {
 function glassCard(ctx, x, y, w, h, r, o, { lift = true, faint = false } = {}) {
   const c = OUT[o];
   const body = () => { rr(ctx, x, y, w, h, r); ctx.fillStyle = C.card; ctx.fill(); };
-  if (lift && C.dark) {   // Night: the card glows in its outcome colour instead of casting a shadow
-    ctx.save();
-    ctx.shadowColor = o === 'none' ? 'rgba(0,0,0,.55)' : `rgba(${c.rgb},${faint ? 0.1 : 0.22})`;
-    ctx.shadowBlur = 44 * SCALE; ctx.shadowOffsetY = 12 * SCALE; body(); ctx.restore();
-  } else if (lift) shadowed(ctx, body, { blur: 34, y: 20, alpha: faint ? 0.14 : 0.28 }); else body();
+  if (C.dark) {
+    // Night: a flat, matte panel. The outcome shows as a thin coloured outline and one short solid tab on
+    // the top edge, like a coloured index tab on a folder. No glow, no sweep, no tint.
+    body();
+    rr(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r - 0.5);
+    ctx.strokeStyle = o === 'none' ? 'rgba(255,255,255,.07)' : `rgba(${c.rgb},${faint ? 0.16 : 0.3})`; ctx.lineWidth = 1; ctx.stroke();
+    if (o !== 'none') { rr(ctx, x + r + 4, y - 1.5, Math.min(56, w * 0.25), 3, 1.5); ctx.fillStyle = c.hex; ctx.fill(); }
+    return;
+  }
+  if (lift) shadowed(ctx, body, { blur: 34, y: 20, alpha: faint ? 0.14 : 0.28 }); else body();
   rr(ctx, x, y, w, h, r);
   const g = ctx.createLinearGradient(0, y, 0, y + h);
   g.addColorStop(0, o === 'none' ? 'rgba(255,255,255,.035)' : `rgba(${c.rgb},.16)`); g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fill();
   // a lit top edge and a hairline
-  rr(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, r - 0.75); ctx.strokeStyle = C.dark ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.07)'; ctx.lineWidth = 1.5; ctx.stroke();
+  rr(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, r - 0.75); ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1.5; ctx.stroke();
   ctx.save(); rr(ctx, x, y, w, h, r); ctx.clip();
   const e = ctx.createLinearGradient(x, 0, x + w, 0);
   e.addColorStop(0, 'rgba(255,255,255,0)'); e.addColorStop(0.5, o === 'none' ? 'rgba(255,255,255,.16)' : `rgba(${c.rgb},.85)`); e.addColorStop(1, 'rgba(255,255,255,0)');
@@ -240,9 +243,12 @@ function curve(ctx, top, height, pts, { labelAll, caption, symbol, x0 = PAD, x1 
   // area: green above zero, red below, fading to the line
   const area = () => { ctx.beginPath(); ctx.moveTo(pts[0].x, zero); pts.forEach((p, i) => ctx.lineTo(p.x, ys[i])); ctx.lineTo(pts[pts.length - 1].x, zero); ctx.closePath(); };
   ctx.save(); area(); ctx.clip();
-  const up = ctx.createLinearGradient(0, ytop, 0, zero); up.addColorStop(0, `rgba(${OUT.win.rgb},.30)`); up.addColorStop(1, `rgba(${OUT.win.rgb},0)`);
+  // Night fills the area flat and faint; Studio fades it toward the zero line
+  const up = C.dark ? `rgba(${OUT.win.rgb},.09)` : ctx.createLinearGradient(0, ytop, 0, zero);
+  if (!C.dark) { up.addColorStop(0, `rgba(${OUT.win.rgb},.30)`); up.addColorStop(1, `rgba(${OUT.win.rgb},0)`); }
   ctx.fillStyle = up; ctx.fillRect(x0 - 20, ytop - 40, x1 - x0 + 40, zero - ytop + 40);
-  const dn = ctx.createLinearGradient(0, zero, 0, base); dn.addColorStop(0, `rgba(${OUT.loss.rgb},0)`); dn.addColorStop(1, `rgba(${OUT.loss.rgb},.28)`);
+  const dn = C.dark ? `rgba(${OUT.loss.rgb},.09)` : ctx.createLinearGradient(0, zero, 0, base);
+  if (!C.dark) { dn.addColorStop(0, `rgba(${OUT.loss.rgb},0)`); dn.addColorStop(1, `rgba(${OUT.loss.rgb},.28)`); }
   ctx.fillStyle = dn; ctx.fillRect(x0 - 20, zero, x1 - x0 + 40, base - zero + 40);
   ctx.restore();
   // the line itself, in ink
@@ -533,9 +539,10 @@ function renderDaily(day, asCanvas = false) {
     text(ctx, `${sym}0`, gx0 - 6, zy - 22, { kind: 'mono', size: 11, color: 'rgba(255,255,255,.28)' });
     // soft area down to zero, then the glowing line
     ctx.save(); ctx.beginPath(); smoothPath(ctx, P); ctx.lineTo(P[P.length - 1].x, zy); ctx.lineTo(P[0].x, zy); ctx.closePath(); ctx.clip();
-    const ag = ctx.createLinearGradient(0, gy0, 0, gy1); ag.addColorStop(0, `rgba(${t.rgb},.30)`); ag.addColorStop(1, `rgba(${t.rgb},0)`);
+    const ag = C.dark ? `rgba(${t.rgb},.08)` : ctx.createLinearGradient(0, gy0, 0, gy1);
+    if (!C.dark) { ag.addColorStop(0, `rgba(${t.rgb},.30)`); ag.addColorStop(1, `rgba(${t.rgb},0)`); }
     ctx.fillStyle = ag; ctx.fillRect(gx0, gy0 - 20, gx1 - gx0, gy1 - gy0 + 40); ctx.restore();
-    ctx.save(); ctx.shadowColor = `rgba(${t.rgb},.9)`; ctx.shadowBlur = 14 * SCALE; ctx.strokeStyle = t.hex; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.save(); ctx.shadowColor = `rgba(${t.rgb},.9)`; ctx.shadowBlur = (C.dark ? 0 : 14) * SCALE; ctx.strokeStyle = t.hex; ctx.lineWidth = C.dark ? 3 : 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath(); smoothPath(ctx, P); ctx.stroke(); ctx.restore();
     // each trade a small bead on the line; the close lit with a halo and its value
     for (let i = 1; i < P.length - 1; i++) {
@@ -562,8 +569,12 @@ function renderDaily(day, asCanvas = false) {
         text(ctx, s, lx, y, { kind: 'mono', size: 11, weight: 600, color: 'rgba(255,255,255,.5)', align: 'center', ls: 1.5 });
       });
     }
-    const halo = ctx.createRadialGradient(end.x, end.y, 0, end.x, end.y, 34); halo.addColorStop(0, `rgba(${t.rgb},.45)`); halo.addColorStop(1, `rgba(${t.rgb},0)`);
-    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(end.x, end.y, 34, 0, Math.PI * 2); ctx.fill();
+    if (C.dark) {   // Night marks the close with a plain ring instead of a halo
+      ctx.strokeStyle = `rgba(${t.rgb},.6)`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(end.x, end.y, 16, 0, Math.PI * 2); ctx.stroke();
+    } else {
+      const halo = ctx.createRadialGradient(end.x, end.y, 0, end.x, end.y, 34); halo.addColorStop(0, `rgba(${t.rgb},.45)`); halo.addColorStop(1, `rgba(${t.rgb},0)`);
+      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(end.x, end.y, 34, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(end.x, end.y, 8, 0, Math.PI * 2); ctx.fill();
     rr(ctx, end.x - lwid + 12, ly, lwid, 30, 15); ctx.fillStyle = '#ffffff'; ctx.fill();
     text(ctx, lbl, end.x - lwid + 24, ly + 8, { kind: 'mono', size: 15, color: '#15171c' });   // a white pill in both themes
@@ -784,7 +795,7 @@ function renderTrades(data, page = 0) {
       const gx0 = lx + lwid - 330, gx1 = lx + lwid - 32, gy0 = ly + 18, gy1 = ly + 50;
       const lo = Math.min(...eq), hi = Math.max(...eq), rg = hi - lo || 1;
       ctx.beginPath(); eq.forEach((v, i) => { const x = gx0 + (i * (gx1 - gx0)) / (eq.length - 1), y = gy1 - ((v - lo) / rg) * (gy1 - gy0); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-      ctx.save(); ctx.shadowColor = `rgba(${t.rgb},.8)`; ctx.shadowBlur = 8 * SCALE; ctx.strokeStyle = t.hex; ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.shadowColor = `rgba(${t.rgb},.8)`; ctx.shadowBlur = (C.dark ? 0 : 8) * SCALE; ctx.strokeStyle = t.hex; ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
       text(ctx, 'RUNNING', gx0 - 14, hy, { kind: 'mono', size: 12, color: 'rgba(255,255,255,.3)', align: 'right', ls: 3 });
     }
     const heads = [['time', 'TIME'], ['sym', 'SYMBOL'], ['size', 'SIZE'], ['px', 'ENTRY / EXIT'], ['held', 'HELD'], ['r', 'R']].filter(([k]) => COL[k] !== undefined).map(([k, s]) => [COL[k], s]);
@@ -876,16 +887,15 @@ function renderThemeSwatch(day, active = 'light') {
   const SW = 1180, SH = 812, cw = 540, ch = 675, top = 40;
   const canvas = createCanvas(SW * SCALE, SH * SCALE), ctx = canvas.getContext('2d');
   ctx.scale(SCALE, SCALE);
-  // the floor: day on the left melting into night on the right
-  const g = ctx.createLinearGradient(0, 0, SW, 0);
-  g.addColorStop(0, THEMES.light.floor2); g.addColorStop(0.47, THEMES.light.floor); g.addColorStop(0.53, THEMES.dark.floor); g.addColorStop(1, THEMES.dark.floor2);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, SW, SH);
+  // the floor: a clean split, day on the left and night on the right
+  ctx.fillStyle = THEMES.light.floor2; ctx.fillRect(0, 0, SW / 2, SH);
+  ctx.fillStyle = THEMES.dark.floor; ctx.fillRect(SW / 2, 0, SW / 2, SH);
   const sides = [['light', 'STUDIO', 40], ['dark', 'NIGHT', SW - 40 - cw]];
   for (const [theme, name, x] of sides) {
     const img = withTheme(theme, toneFor(day.total, !(day.trades || []).some((t) => t.outcome !== 'missed')), () => renderDaily(day, true));
     const on = active === theme || active === 'auto';
     ctx.save();
-    ctx.shadowColor = theme === 'dark' ? 'rgba(0,0,0,.6)' : 'rgba(26,33,51,.22)'; ctx.shadowBlur = 30 * SCALE; ctx.shadowOffsetY = 14 * SCALE;
+    ctx.shadowColor = theme === 'dark' ? 'rgba(0,0,0,0)' : 'rgba(26,33,51,.22)'; ctx.shadowBlur = 30 * SCALE; ctx.shadowOffsetY = 14 * SCALE;
     rr(ctx, x, top, cw, ch, 22); ctx.fillStyle = theme === 'dark' ? THEMES.dark.floor : THEMES.light.floor; ctx.fill(); ctx.restore();
     ctx.save(); rr(ctx, x, top, cw, ch, 22); ctx.clip(); ctx.drawImage(img, x, top, cw, ch); ctx.restore();
     if (on) { rr(ctx, x - 6, top - 6, cw + 12, ch + 12, 27); ctx.strokeStyle = active === 'auto' ? 'rgba(121,131,255,.85)' : `rgba(${OUT.win.rgb},.9)`; ctx.lineWidth = 3; ctx.stroke(); }
