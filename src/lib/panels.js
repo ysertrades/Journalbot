@@ -81,7 +81,77 @@ function journalPanel(draft, guild, settings, { notice } = {}) {
     btn(`jr:${id}:post`, 'Post', ButtonStyle.Success, { disabled: !isReady(draft) }),
     btn(`jr:${id}:cancel`, 'Cancel', ButtonStyle.Danger),
   ));
+  // bulk import, below everything: drop a broker / prop-firm CSV and every trade lands in its outcome's post
+  c.addSeparatorComponents(sep());
+  c.addSectionComponents(new SectionBuilder()
+    .addTextDisplayComponents(td('**\u{1F4E5} Import trades from a CSV**\n-# Drop an export from Hyperprop, Tradovate, TopstepX or any sheet. Wins, losses and breakevens are sorted into their posts; nothing posts until you confirm.'))
+    .setButtonAccessory(btn(`jr:${id}:csv`, 'Upload CSV', ButtonStyle.Primary)));
   return c;
+}
+
+/* ======================= CSV IMPORT ======================= */
+function csvModal(draft) {
+  return new ModalBuilder().setCustomId(`jrm:${draft.id}:csv`).setTitle('Import trades from CSV').addLabelComponents(
+    new LabelBuilder().setLabel('Trade history (.csv)').setDescription('Closed trades with a symbol and PnL; side, prices, times and fees are read when present')
+      .setFileUploadComponent(new FileUploadBuilder().setCustomId('file').setMinValues(1).setMaxValues(1).setRequired(true)),
+    lbl('Label these trades (optional)', txt('tag', { value: draft.fields._import_tag, placeholder: 'Hyperprop · eval 50K', max: 60 }), 'Shown as the setup line on each imported post'),
+  );
+}
+
+const OUT_EMOJI = { win: '\u{1F7E2}', loss: '\u{1F534}', be: '\u{1F7E1}' };
+const OUT_NAME = { win: 'Wins', loss: 'Losses', be: 'Breakeven' };
+function destLine(settings, outcome) {
+  const t = routeTarget(settings, outcome);
+  if (!t) return '⚠️ no destination set, these will be skipped';
+  return t.threadId ? `→ <#${t.threadId}>` : `→ new post in <#${t.forumId}>`;
+}
+/**
+ * imp: { file, format, trades[], dupes, skipped[], truncated }
+ * The preview: what's in the file, where each group will go, the running PnL as a sparkline.
+ */
+function csvPreviewPanel(draft, guild, settings, imp, { sparkline }) {
+  const sym = settings.currency, money = (c) => formatCents(c, { symbol: sym });
+  const tr = imp.trades, total = tr.reduce((s, t) => s + t.pnl_cents, 0);
+  const color = total > 0 ? OUTCOMES.win.color : total < 0 ? OUTCOMES.loss.color : OUTCOMES.be.color;
+  const c = new ContainerBuilder().setAccentColor(tr.length ? color : NEUTRAL_COLOR);
+  c.addTextDisplayComponents(td(`# \u{1F4E5} Import preview\n-# ${imp.file} · ${imp.format}${imp.truncated ? ' · first 1000 rows' : ''}`));
+  if (!tr.length) {
+    c.addTextDisplayComponents(td(imp.dupes ? `Every trade in this file is already in your journal (${imp.dupes}). Nothing new to import.` : 'No trades could be read from this file.'));
+  } else {
+    let run = 0; const curve = tr.map((t) => (run += t.pnl_cents));
+    const first = tr[0].date, last = tr[tr.length - 1].date;
+    const best = tr.reduce((a, b) => (b.pnl_cents > a.pnl_cents ? b : a)), worst = tr.reduce((a, b) => (b.pnl_cents < a.pnl_cents ? b : a));
+    const fees = tr.reduce((s, t) => s + t.fee_cents, 0);
+    c.addTextDisplayComponents(td(`## ${money(total)}\n\`${sparkline(curve.map((v) => v / 100), 28)}\`\n-# ${tr.length} trade${tr.length === 1 ? '' : 's'} · ${formatDateDisplay(first)}${last !== first ? ` → ${formatDateDisplay(last)}` : ''}${fees ? ` · ${money(fees)} fees taken off` : ''}`));
+    c.addSeparatorComponents(sep());
+    const lines = ['win', 'loss', 'be'].map((o) => {
+      const g = tr.filter((t) => t.outcome === o); if (!g.length) return null;
+      return `${OUT_EMOJI[o]} **${OUT_NAME[o]}** · ${g.length} · ${money(g.reduce((s, t) => s + t.pnl_cents, 0))}  ${destLine(settings, o)}`;
+    }).filter(Boolean);
+    c.addTextDisplayComponents(td(lines.join('\n')));
+    c.addTextDisplayComponents(td(`-# Best ${best.instrument} ${money(best.pnl_cents)} · worst ${worst.instrument} ${money(worst.pnl_cents)}${tr.some((t) => t.sideGuessed) ? ' · side not in the file for some rows, shown as Long' : ''}`));
+  }
+  const notes = [];
+  if (imp.dupes) notes.push(`♻️ ${imp.dupes} already imported before, skipped`);
+  if (imp.skipped.length) {
+    const why = {}; for (const s of imp.skipped) (why[s.why] ||= []).push(s.row);
+    notes.push(`⏭️ ${imp.skipped.length} row${imp.skipped.length === 1 ? '' : 's'} skipped: ${Object.entries(why).map(([w, r]) => `${w} (row${r.length === 1 ? '' : 's'} ${r.slice(0, 4).join(', ')}${r.length > 4 ? '…' : ''})`).join('; ')}`);
+  }
+  if (notes.length) c.addTextDisplayComponents(td(`-# ${notes.join('\n-# ')}`));
+  const postable = tr.filter((t) => routeTarget(settings, t.outcome)).length;
+  c.addActionRowComponents(row(
+    btn(`jr:${draft.id}:csvgo`, postable ? `Import ${postable} trade${postable === 1 ? '' : 's'}` : 'Nothing to import', ButtonStyle.Success, { disabled: !postable }),
+    btn(`jr:${draft.id}:csv`, 'Choose another file'),
+    btn(`jr:${draft.id}:csvback`, 'Back to journal'),
+  ));
+  return c;
+}
+
+/** live progress while trades are posted */
+function csvProgressCard(done, total, last) {
+  const w = 16, filled = Math.round((done / Math.max(1, total)) * w);
+  return new ContainerBuilder().setAccentColor(NEUTRAL_COLOR).addTextDisplayComponents(td(
+    `# Importing…\n\`${'█'.repeat(filled)}${'░'.repeat(w - filled)}\` **${done}/${total}**${last ? `\n-# last: ${last}` : ''}\n-# Keep this open; posts are paced so Discord doesn't throttle them.`));
 }
 
 function previewPanel(draft, guild, settings) {
@@ -276,4 +346,4 @@ function pickPanel({ key, forumId, posts, page, settings }) {
   return c;
 }
 
-module.exports = { pickPanel, describeTarget, journalPanel, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS };
+module.exports = { pickPanel, describeTarget, journalPanel, csvModal, csvPreviewPanel, csvProgressCard, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS };
