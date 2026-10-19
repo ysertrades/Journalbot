@@ -5,29 +5,36 @@ const {
 const { DateTime } = require('luxon');
 const { getSettings, listConfiguredGuilds, claimReport, finishReport, getReport } = require('./db');
 const { weekData, monthData, dayData } = require('./pnl');
-const { renderWeekly, renderMonthly, renderDaily } = require('./renderer');
+const { renderWeekly, renderMonthly, renderDaily, renderThemeSwatch } = require('./renderer');
 const { scanGuild } = require('./scanner');
 const { formatDollars } = require('./money');
 const { totalColor } = require('./format');
+const { resolveTheme } = require('./theme');
 
 const GRACE_HOURS = 6;
 
 function weeklyImage(guildId, anchorISO, settings) {
   const data = weekData(guildId, anchorISO, settings.timezone, settings.currency);
   const summary = `**Week ${data.weekNo}** · ${formatDollars(data.total, { symbol: settings.currency })} · ${data.trades ? `${data.winRate}% win rate · ${data.trades} trades` : 'no trades logged'}`;
-  return { buffer: renderWeekly(data), name: `weekly-pnl-${data.start}.png`, summary, data };
+  return { buffer: renderWeekly(data, { theme: resolveTheme(settings) }), name: `weekly-pnl-${data.start}.png`, summary, data };
 }
 function monthlyImage(guildId, year, month, settings) {
   const data = monthData(guildId, year, month, settings.timezone, settings.currency);
   const wr = data.tradedDays ? `${Math.round((100 * data.green) / data.tradedDays)}% green days` : 'no trades logged';
   const summary = `**${data.monthLabel.charAt(0)}${data.monthLabel.slice(1).toLowerCase()}** · ${formatDollars(data.total, { symbol: settings.currency })} · ${data.tradedDays} trading days · ${wr}`;
-  return { buffer: renderMonthly(data), name: `monthly-pnl-${year}-${String(month).padStart(2, '0')}.png`, summary, data };
+  return { buffer: renderMonthly(data, { theme: resolveTheme(settings) }), name: `monthly-pnl-${year}-${String(month).padStart(2, '0')}.png`, summary, data };
+}
+
+/** the Appearance page's preview: today in Studio and in Night, side by side */
+function themeSwatch(guildId, settings) {
+  const today = DateTime.now().setZone(settings.timezone).toISODate();
+  return renderThemeSwatch(dayData(guildId, today, settings.timezone, settings.currency), settings.theme || 'light');
 }
 
 function dailyImage(guildId, isoDate, settings) {
   const data = dayData(guildId, isoDate, settings.timezone, settings.currency);
   const summary = `**${data.weekday}** · ${formatDollars(data.total, { symbol: settings.currency })} · ${data.count ? `${data.count} trade${data.count === 1 ? '' : 's'} · ${data.winRate}% win rate` : 'no trades logged'}`;
-  return { buffer: renderDaily(data), name: `daily-pnl-${isoDate}.png`, summary, data };
+  return { buffer: renderDaily(data, { theme: resolveTheme(settings) }), name: `daily-pnl-${isoDate}.png`, summary, data };
 }
 
 function reportMessage(img, settings, { late } = {}) {
@@ -114,4 +121,4 @@ async function tick(client) {
   } finally { ticking = false; }
 }
 
-module.exports = { weeklyImage, monthlyImage, dailyImage, postNow, sendReport, dueJobs, isDue, tick, reportMessage };
+module.exports = { weeklyImage, monthlyImage, dailyImage, themeSwatch, postNow, sendReport, dueJobs, isDue, tick, reportMessage };

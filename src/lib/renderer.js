@@ -32,11 +32,26 @@ const PAD = 56;
 const INNER_W = W - PAD * 2;
 const BASE_K = { inter: 0.864, mono: 0.86, serif: 0.8 }; // baseline inside a line-height:1 box
 
-/* the landing page's palette */
-const C = {
-  floor: '#f9fbfb', floor2: '#eef0f4', ink: '#15171c', ink2: '#2a2d36', grey: '#8b8b92', soft: '#5b5f6b',
-  line: 'rgba(26,33,51,.08)', card: '#0c0d10', card2: '#16181d', shadow: '26,33,51', blurple: '#5865f2',
+/**
+ * Two palettes over the same drawing. Studio is the landing page: a bright
+ * floor, white paper tiles, dark glass cards. Night turns the room off: a
+ * graphite floor with a faint aurora in the period's outcome colour, paper
+ * tiles become smoked glass, and the glass cards glow in their outcome colour
+ * instead of casting a shadow. Every draw reads C, so one swap themes a card.
+ */
+const THEMES = {
+  light: {
+    floor: '#f9fbfb', floor2: '#eef0f4', glow: '#ffffff', ink: '#15171c', ink2: '#2a2d36', inkInv: '#ffffff', grey: '#8b8b92', soft: '#5b5f6b',
+    line: 'rgba(26,33,51,.08)', card: '#0c0d10', card2: '#16181d', shadow: '26,33,51', shadowK: 1, grid: '26,33,51', gridA: 0.06,
+    paper: '#ffffff', paperDim: 'rgba(255,255,255,.55)', tile: '#15171c', capsule: '#15171c', blurple: '#5865f2', dark: false,
+  },
+  dark: {
+    floor: '#0e1014', floor2: '#060709', glow: '#1c2029', ink: '#f2f3f6', ink2: '#d6d9e0', inkInv: '#0c0d10', grey: '#7c818d', soft: '#a3a9b5',
+    line: 'rgba(255,255,255,.075)', card: '#111318', card2: '#181b21', shadow: '0,0,0', shadowK: 2.4, grid: '255,255,255', gridA: 0.045,
+    paper: '#16191f', paperDim: 'rgba(22,25,31,.6)', tile: '#07080a', capsule: '#1f232b', blurple: '#7983ff', dark: true,
+  },
 };
+const C = { ...THEMES.light, aurora: null };
 /* outcome colours: bright on the dark cards, deeper on the light floor */
 const OUT = {
   win:  { rgb: '60,207,122',  hex: '#3ccf7a', deep: '#159a52', word: 'WIN' },
@@ -44,6 +59,25 @@ const OUT = {
   be:   { rgb: '245,184,75',  hex: '#f5b84b', deep: '#b97a0c', word: 'BREAKEVEN' },
   none: { rgb: '148,163,184', hex: '#94a3b8', deep: '#8b8b92', word: 'NO TRADE' },
 };
+const DEEP_LIGHT = Object.fromEntries(Object.entries(OUT).map(([k, v]) => [k, v.deep]));
+
+/**
+ * Runs one render in a theme: 'light' | 'dark'. The aurora is the period's
+ * tone (only Night draws it). Rendering is synchronous, so swapping the shared
+ * palette and putting it back afterwards can never leak into another card.
+ */
+function withTheme(theme, tone, draw) {
+  const prev = { ...C };
+  Object.assign(C, THEMES[theme] || THEMES.light, { aurora: tone });
+  // on a dark floor the "deep" text colours would sink; the bright ones read instead
+  for (const k of Object.keys(OUT)) OUT[k].deep = C.dark ? (k === 'none' ? C.grey : OUT[k].hex) : DEEP_LIGHT[k];
+  try { return draw(); } finally {
+    Object.assign(C, prev);
+    for (const k of Object.keys(OUT)) OUT[k].deep = DEEP_LIGHT[k];
+  }
+}
+const toneFor = (total, empty) => (empty ? 'none' : total > 0 ? 'win' : total < 0 ? 'loss' : 'be');
+
 const outcomeOf = (d) => (!d || d.trades === 0 ? 'none' : d.pnl > 0 ? 'win' : d.pnl < 0 ? 'loss' : 'be');
 const toneOf = (v) => (v > 0 ? 'win' : v < 0 ? 'loss' : 'be');
 
@@ -74,7 +108,7 @@ function shrink(ctx, str, maxW, { kind = 'inter', size, weight = 800, ls = 0, mi
   return s;
 }
 function shadowed(ctx, fn, { blur = 30, y = 18, alpha = 0.22 } = {}) {
-  ctx.save(); ctx.shadowColor = `rgba(${C.shadow},${alpha})`; ctx.shadowBlur = blur * SCALE; ctx.shadowOffsetY = y * SCALE; fn(); ctx.restore();
+  ctx.save(); ctx.shadowColor = `rgba(${C.shadow},${Math.min(0.85, alpha * C.shadowK)})`; ctx.shadowBlur = blur * SCALE; ctx.shadowOffsetY = y * SCALE; fn(); ctx.restore();
 }
 function icon(ctx, kind, cx, cy, size, color, stroke = 3.2) {
   const k = size / 24; ctx.save(); ctx.translate(cx - size / 2, cy - size / 2); ctx.scale(k, k);
@@ -100,11 +134,21 @@ function star(ctx, cx, cy, r, color) {
 /* ------------------------------- the floor ------------------------------- */
 function floor(ctx, H, W = 1600) {
   const g = ctx.createRadialGradient(W * 0.68, -40, 0, W * 0.68, -40, W * 0.95);
-  g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, C.floor); g.addColorStop(1, C.floor2);
+  g.addColorStop(0, C.glow); g.addColorStop(0.45, C.floor); g.addColorStop(1, C.floor2);
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // Night: a faint aurora in the period's colour behind the headline, and a cool counter-glow low on the left
+  if (C.dark) {
+    const a = OUT[C.aurora && C.aurora !== 'none' ? C.aurora : 'none'];
+    const au = ctx.createRadialGradient(W * 0.8, -H * 0.05, 0, W * 0.8, -H * 0.05, Math.max(W, H) * 0.7);
+    au.addColorStop(0, `rgba(${a.rgb},${C.aurora && C.aurora !== 'none' ? 0.16 : 0.07})`); au.addColorStop(0.5, `rgba(${a.rgb},.04)`); au.addColorStop(1, `rgba(${a.rgb},0)`);
+    ctx.fillStyle = au; ctx.fillRect(0, 0, W, H);
+    const cg = ctx.createRadialGradient(-W * 0.1, H * 1.05, 0, -W * 0.1, H * 1.05, W * 0.7);
+    cg.addColorStop(0, 'rgba(88,101,242,.07)'); cg.addColorStop(1, 'rgba(88,101,242,0)');
+    ctx.fillStyle = cg; ctx.fillRect(0, 0, W, H);
+  }
   // the soft grid, fading toward the edges
   const grid = createCanvas(W, H), gx = grid.getContext('2d');
-  gx.strokeStyle = `rgba(${C.shadow},.06)`; gx.lineWidth = 1; gx.beginPath();
+  gx.strokeStyle = `rgba(${C.grid},${C.gridA})`; gx.lineWidth = 1; gx.beginPath();
   for (let x = 0; x <= W; x += 40) { gx.moveTo(x + 0.5, 0); gx.lineTo(x + 0.5, H); }
   for (let y = 0; y <= H; y += 40) { gx.moveTo(0, y + 0.5); gx.lineTo(W, y + 0.5); }
   gx.stroke();
@@ -122,9 +166,9 @@ function header(ctx, { kicker, lead, total, label, chip, symbol, empty }) {
   // the pill: ink tile with a live dot, then the kicker
   const pillY = 46, pillH = 46, kw = measure(ctx, kicker, 'inter', 17, 600, 0.2);
   const pillW = 12 + 26 + 12 + kw + 22;
-  shadowed(ctx, () => { rr(ctx, PAD, pillY, pillW, pillH, 23); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
+  shadowed(ctx, () => { rr(ctx, PAD, pillY, pillW, pillH, 23); ctx.fillStyle = C.paper; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
   rr(ctx, PAD + 0.5, pillY + 0.5, pillW - 1, pillH - 1, 23); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
-  rr(ctx, PAD + 10, pillY + 10, 26, 26, 8); ctx.fillStyle = C.ink; ctx.fill();
+  rr(ctx, PAD + 10, pillY + 10, 26, 26, 8); ctx.fillStyle = C.tile; ctx.fill();
   ctx.fillStyle = empty ? OUT.none.hex : t.hex; ctx.beginPath(); ctx.arc(PAD + 23, pillY + 23, 4.5, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = `rgba(${empty ? OUT.none.rgb : t.rgb},.35)`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(PAD + 23, pillY + 23, 8, 0, Math.PI * 2); ctx.stroke();
   text(ctx, kicker, PAD + 12 + 26 + 12, pillY + 15, { size: 17, weight: 600, color: C.ink2, ls: 0.2 });
@@ -146,7 +190,7 @@ function header(ctx, { kicker, lead, total, label, chip, symbol, empty }) {
   if (chip != null) {
     const o = OUT[toneOf(chip)], s = `+ WEEKEND ${formatDollars(chip, { symbol })}`;
     const cw = measure(ctx, s, 'inter', 15, 600, 1.6) + 36, cx = W - PAD - vw - 26 - cw, cy = 84 + vs * 0.36;
-    rr(ctx, cx, cy, cw, 40, 20); ctx.fillStyle = '#ffffff'; ctx.fill();
+    rr(ctx, cx, cy, cw, 40, 20); ctx.fillStyle = C.paper; ctx.fill();
     rr(ctx, cx + 0.5, cy + 0.5, cw - 1, 39, 20); ctx.strokeStyle = `rgba(${o.rgb},.55)`; ctx.lineWidth = 1.5; ctx.stroke();
     text(ctx, s, cx + 18, cy + 13, { size: 15, weight: 600, color: o.deep, ls: 1.6 });
   }
@@ -156,13 +200,17 @@ function header(ctx, { kicker, lead, total, label, chip, symbol, empty }) {
 function glassCard(ctx, x, y, w, h, r, o, { lift = true, faint = false } = {}) {
   const c = OUT[o];
   const body = () => { rr(ctx, x, y, w, h, r); ctx.fillStyle = C.card; ctx.fill(); };
-  if (lift) shadowed(ctx, body, { blur: 34, y: 20, alpha: faint ? 0.14 : 0.28 }); else body();
+  if (lift && C.dark) {   // Night: the card glows in its outcome colour instead of casting a shadow
+    ctx.save();
+    ctx.shadowColor = o === 'none' ? 'rgba(0,0,0,.55)' : `rgba(${c.rgb},${faint ? 0.1 : 0.22})`;
+    ctx.shadowBlur = 44 * SCALE; ctx.shadowOffsetY = 12 * SCALE; body(); ctx.restore();
+  } else if (lift) shadowed(ctx, body, { blur: 34, y: 20, alpha: faint ? 0.14 : 0.28 }); else body();
   rr(ctx, x, y, w, h, r);
   const g = ctx.createLinearGradient(0, y, 0, y + h);
   g.addColorStop(0, o === 'none' ? 'rgba(255,255,255,.035)' : `rgba(${c.rgb},.16)`); g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fill();
   // a lit top edge and a hairline
-  rr(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, r - 0.75); ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1.5; ctx.stroke();
+  rr(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, r - 0.75); ctx.strokeStyle = C.dark ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.07)'; ctx.lineWidth = 1.5; ctx.stroke();
   ctx.save(); rr(ctx, x, y, w, h, r); ctx.clip();
   const e = ctx.createLinearGradient(x, 0, x + w, 0);
   e.addColorStop(0, 'rgba(255,255,255,0)'); e.addColorStop(0.5, o === 'none' ? 'rgba(255,255,255,.16)' : `rgba(${c.rgb},.85)`); e.addColorStop(1, 'rgba(255,255,255,0)');
@@ -187,7 +235,7 @@ function curve(ctx, top, height, pts, { labelAll, caption, symbol, x0 = PAD, x1 
   const Y = (v) => base - ((v - lo) / rng) * (base - ytop);
   const zero = Y(0), ys = vals.map(Y);
   // the zero line
-  ctx.save(); ctx.setLineDash([4, 8]); ctx.strokeStyle = `rgba(${C.shadow},.22)`; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x0, zero); ctx.lineTo(x1, zero); ctx.stroke(); ctx.restore();
+  ctx.save(); ctx.setLineDash([4, 8]); ctx.strokeStyle = `rgba(${C.grid},.22)`; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x0, zero); ctx.lineTo(x1, zero); ctx.stroke(); ctx.restore();
   const last = vals[vals.length - 1], t = OUT[toneOf(last)];
   // area: green above zero, red below, fading to the line
   const area = () => { ctx.beginPath(); ctx.moveTo(pts[0].x, zero); pts.forEach((p, i) => ctx.lineTo(p.x, ys[i])); ctx.lineTo(pts[pts.length - 1].x, zero); ctx.closePath(); };
@@ -205,15 +253,15 @@ function curve(ctx, top, height, pts, { labelAll, caption, symbol, x0 = PAD, x1 
     const isLast = i === pts.length - 1;
     if (p.ghost || (!labelAll && !isLast)) return; // ghost: the $0 start, line only
     const o = OUT[toneOf(p.v)];
-    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(p.x, ys[i], isLast ? 10 : 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(p.x, ys[i], isLast ? 10 : 8, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.stroke();
     ctx.fillStyle = o.hex; ctx.beginPath(); ctx.arc(p.x, ys[i], isLast ? 4.5 : 3.5, 0, Math.PI * 2); ctx.fill();
     // value tag: a small white pill above the point
     const s = formatDollars(p.v, { symbol }), tw = measure(ctx, s, 'mono', 16) + 22;
     let tx = labelAll ? p.x - tw / 2 : p.x - tw; tx = Math.max(x0, Math.min(x1 - tw, tx));
     const ty = ys[i] - 52;
-    shadowed(ctx, () => { rr(ctx, tx, ty, tw, 30, 15); ctx.fillStyle = isLast ? C.ink : '#ffffff'; ctx.fill(); }, { blur: 12, y: 5, alpha: 0.12 });
-    text(ctx, s, tx + 11, ty + 8, { kind: 'mono', size: 16, color: isLast ? '#ffffff' : o.deep });
+    shadowed(ctx, () => { rr(ctx, tx, ty, tw, 30, 15); ctx.fillStyle = isLast ? C.ink : C.paper; ctx.fill(); }, { blur: 12, y: 5, alpha: 0.12 });
+    text(ctx, s, tx + 11, ty + 8, { kind: 'mono', size: 16, color: isLast ? C.inkInv : o.deep });
   });
 }
 
@@ -222,7 +270,7 @@ function stats(ctx, top, list, h = 92) {
   const n = list.length, gap = 14, cw = (INNER_W - gap * (n - 1)) / n;
   list.forEach((s, i) => {
     const x = PAD + i * (cw + gap);
-    shadowed(ctx, () => { rr(ctx, x, top, cw, h, 22); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 22, y: 10, alpha: 0.1 });
+    shadowed(ctx, () => { rr(ctx, x, top, cw, h, 22); ctx.fillStyle = C.paper; ctx.fill(); }, { blur: 22, y: 10, alpha: 0.1 });
     rr(ctx, x + 0.5, top + 0.5, cw - 1, h - 1, 22); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
     text(ctx, s.k, x + 22, top + 20, { kind: 'mono', size: 13, color: C.grey, ls: 3 });
     const col = s.tone === 'good' ? OUT.win.deep : s.tone === 'bad' ? OUT.loss.deep : C.ink;
@@ -234,7 +282,7 @@ function stats(ctx, top, list, h = 92) {
 /* --------------------------------- footer -------------------------------- */
 function footer(ctx, H, W = 1600, PAD = 56, left = 'NQ · ES · YM — NEW YORK') {
   const base = H - 40;
-  ctx.fillStyle = `rgba(${C.shadow},.08)`; ctx.fillRect(PAD, base - 44, W - PAD * 2, 1);
+  ctx.fillStyle = `rgba(${C.grid},.08)`; ctx.fillRect(PAD, base - 44, W - PAD * 2, 1);
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   font(ctx, 'mono', 15); setLS(ctx, 5); ctx.fillStyle = C.grey;
   ctx.fillText(left, PAD, base); setLS(ctx, 0);
@@ -274,7 +322,7 @@ function renderWeekly(week) {
     if (best && d === best && best.pnl > 0) {
       const bw = measure(ctx, 'BEST', 'inter', 11, 600, 2) + 22;
       rr(ctx, x + cw / 2 - bw / 2, y - 13, bw, 26, 13); ctx.fillStyle = '#ffffff'; ctx.fill();
-      text(ctx, 'BEST', x + cw / 2, y - 5, { size: 11, weight: 600, color: C.ink, align: 'center', ls: 2 });
+      text(ctx, 'BEST', x + cw / 2, y - 5, { size: 11, weight: 600, color: '#15171c', align: 'center', ls: 2 });
     }
     const val = o === 'none' ? '—' : formatDollars(d.pnl, { symbol: sym });
     const vs = shrink(ctx, val, iw, { size: 54, weight: 800, ls: -1.6 });
@@ -337,15 +385,15 @@ function renderMonthly(month) {
       const x = colX[i], w = colW[i], inMonth = dt.month === month.month;
       const d = inMonth ? data[dt.day] : null, o = d ? outcomeOf(d) : 'none', weekend = i > 4;
       if (!inMonth) { // outside the month: a dashed outline on the floor
-        ctx.save(); ctx.setLineDash([5, 7]); ctx.strokeStyle = `rgba(${C.shadow},.12)`; ctx.lineWidth = 1.2; rr(ctx, x + 1, y + 1, w - 2, CELL_H - 2, 18); ctx.stroke(); ctx.restore();
+        ctx.save(); ctx.setLineDash([5, 7]); ctx.strokeStyle = `rgba(${C.grid},.12)`; ctx.lineWidth = 1.2; rr(ctx, x + 1, y + 1, w - 2, CELL_H - 2, 18); ctx.stroke(); ctx.restore();
         text(ctx, String(dt.day), x + 16, y + 14, { kind: 'mono', size: 15, color: 'rgba(139,139,146,.45)' });
         return;
       }
       if (d && d.trades) { wp += d.pnl; wd += 1; }
       if (o === 'none') { // an untraded day: a white card resting on the floor (weekends hatched)
-        rr(ctx, x, y, w, CELL_H, 18); ctx.fillStyle = weekend ? 'rgba(255,255,255,.55)' : '#ffffff'; ctx.fill();
+        rr(ctx, x, y, w, CELL_H, 18); ctx.fillStyle = weekend ? C.paperDim : C.paper; ctx.fill();
         if (weekend) {
-          ctx.save(); rr(ctx, x, y, w, CELL_H, 18); ctx.clip(); ctx.strokeStyle = `rgba(${C.shadow},.05)`; ctx.lineWidth = 6;
+          ctx.save(); rr(ctx, x, y, w, CELL_H, 18); ctx.clip(); ctx.strokeStyle = `rgba(${C.grid},.05)`; ctx.lineWidth = 6;
           for (let k = -CELL_H; k < w + CELL_H; k += 18) { ctx.beginPath(); ctx.moveTo(x + k, y + CELL_H); ctx.lineTo(x + k + CELL_H, y); ctx.stroke(); }
           ctx.restore();
         }
@@ -367,7 +415,7 @@ function renderMonthly(month) {
     // the week's total: an ink capsule
     wkNo += 1;
     const wo = wd ? toneOf(wp) : 'none', wc = OUT[wo], x = colX[7], w = colW[7];
-    shadowed(ctx, () => { rr(ctx, x, y, w, CELL_H, 30); ctx.fillStyle = C.ink; ctx.fill(); }, { blur: 26, y: 14, alpha: 0.22 });
+    shadowed(ctx, () => { rr(ctx, x, y, w, CELL_H, 30); ctx.fillStyle = C.capsule; ctx.fill(); }, { blur: 26, y: 14, alpha: 0.22 });
     ctx.save(); rr(ctx, x, y, w, CELL_H, 30); ctx.clip(); ctx.fillStyle = wo === 'none' ? 'rgba(255,255,255,.08)' : wc.hex; ctx.fillRect(x, y + CELL_H - 4, w, 4); ctx.restore();
     const cx = x + w / 2;
     text(ctx, `WEEK ${wkNo}`, cx + 2, y + 18, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.5)', align: 'center', ls: 4 });
@@ -427,7 +475,7 @@ function symbolBook(trades) {
   return [...out.filter((g) => g.symbol !== 'OTHER'), ...out.filter((g) => g.symbol === 'OTHER')];
 }
 
-function renderDaily(day) {
+function renderDaily(day, asCanvas = false) {
   ensureFonts();
   const sym = day.symbol || '$';
   const canvas = createCanvas(DW * SCALE, DH * SCALE), ctx = canvas.getContext('2d');
@@ -440,9 +488,9 @@ function renderDaily(day) {
 
   // pill and date
   const kicker = 'Journal · Daily PnL', kw = measure(ctx, kicker, 'inter', 17, 600, 0.2), pw = 12 + 26 + 12 + kw + 22;
-  shadowed(ctx, () => { rr(ctx, DPAD, 56, pw, 46, 23); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
+  shadowed(ctx, () => { rr(ctx, DPAD, 56, pw, 46, 23); ctx.fillStyle = C.paper; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
   rr(ctx, DPAD + 0.5, 56.5, pw - 1, 45, 23); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
-  rr(ctx, DPAD + 10, 66, 26, 26, 8); ctx.fillStyle = C.ink; ctx.fill();
+  rr(ctx, DPAD + 10, 66, 26, 26, 8); ctx.fillStyle = C.tile; ctx.fill();
   ctx.fillStyle = t.hex; ctx.beginPath(); ctx.arc(DPAD + 23, 79, 4.5, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = `rgba(${t.rgb},.35)`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(DPAD + 23, 79, 8, 0, Math.PI * 2); ctx.stroke();
   text(ctx, kicker, DPAD + 50, 71, { size: 17, weight: 600, color: C.ink2, ls: 0.2 });
@@ -518,7 +566,7 @@ function renderDaily(day) {
     ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(end.x, end.y, 34, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(end.x, end.y, 8, 0, Math.PI * 2); ctx.fill();
     rr(ctx, end.x - lwid + 12, ly, lwid, 30, 15); ctx.fillStyle = '#ffffff'; ctx.fill();
-    text(ctx, lbl, end.x - lwid + 24, ly + 8, { kind: 'mono', size: 15, color: C.ink });
+    text(ctx, lbl, end.x - lwid + 24, ly + 8, { kind: 'mono', size: 15, color: '#15171c' });   // a white pill in both themes
     // the book: one glass chip per symbol, holding that symbol's outcome beads in order and its net
     const by = cy + ch - 64;
     text(ctx, 'BOOK', cx + 34, by - 7, { kind: 'mono', size: 12, color: 'rgba(255,255,255,.35)', ls: 3 });
@@ -558,7 +606,7 @@ function renderDaily(day) {
   const gap = 16, tw = (DINNER - gap * 2) / 3, ty = 1036, th = 132;
   tiles.forEach((s, i) => {
     const x = DPAD + i * (tw + gap);
-    shadowed(ctx, () => { rr(ctx, x, ty, tw, th, 26); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 24, y: 12, alpha: 0.1 });
+    shadowed(ctx, () => { rr(ctx, x, ty, tw, th, 26); ctx.fillStyle = C.paper; ctx.fill(); }, { blur: 24, y: 12, alpha: 0.1 });
     rr(ctx, x + 0.5, ty + 0.5, tw - 1, th - 1, 26); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
     text(ctx, s.k, x + 24, ty + 24, { kind: 'mono', size: 12, color: C.grey, ls: 2.8 });
     const col = s.tone === 'good' ? OUT.win.deep : s.tone === 'bad' ? OUT.loss.deep : C.ink;
@@ -570,7 +618,7 @@ function renderDaily(day) {
   // the sign-off names what was actually traded today
   const traded = symbolBook(trades).map((g) => g.symbol).filter((s) => s !== 'OTHER').slice(0, 4);
   footer(ctx, DH, DW, DPAD, traded.length ? `${traded.join(' · ')} — NEW YORK` : undefined);
-  return canvas.toBuffer('image/png');
+  return asCanvas ? canvas : canvas.toBuffer('image/png');
 }
 
 /* ------------------------------- TRADES (the ledger) ------------------------------- */
@@ -634,9 +682,9 @@ function renderTrades(data, page = 0) {
 
   // pill, period label
   const kicker = 'Journal · Trades', kw = measure(ctx, kicker, 'inter', 17, 600, 0.2), pw = 12 + 26 + 12 + kw + 22;
-  shadowed(ctx, () => { rr(ctx, PAD, 46, pw, 46, 23); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
+  shadowed(ctx, () => { rr(ctx, PAD, 46, pw, 46, 23); ctx.fillStyle = C.paper; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
   rr(ctx, PAD + 0.5, 46.5, pw - 1, 45, 23); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
-  rr(ctx, PAD + 10, 56, 26, 26, 8); ctx.fillStyle = C.ink; ctx.fill();
+  rr(ctx, PAD + 10, 56, 26, 26, 8); ctx.fillStyle = C.tile; ctx.fill();
   // a tiny ledger glyph in the tile: three lines
   ctx.strokeStyle = t.hex; ctx.lineWidth = 2; ctx.lineCap = 'round';
   [[63, 12], [69, 8], [75, 10]].forEach(([y, w]) => { ctx.beginPath(); ctx.moveTo(PAD + 17, y); ctx.lineTo(PAD + 17 + w, y); ctx.stroke(); });
@@ -671,7 +719,7 @@ function renderTrades(data, page = 0) {
   const gap = 14, chw = (INNER_W - gap * 5) / 6, chy = 244;
   chips.forEach((s, i) => {
     const x = PAD + i * (chw + gap);
-    shadowed(ctx, () => { rr(ctx, x, chy, chw, 96, 22); ctx.fillStyle = '#ffffff'; ctx.fill(); }, { blur: 22, y: 10, alpha: 0.1 });
+    shadowed(ctx, () => { rr(ctx, x, chy, chw, 96, 22); ctx.fillStyle = C.paper; ctx.fill(); }, { blur: 22, y: 10, alpha: 0.1 });
     rr(ctx, x + 0.5, chy + 0.5, chw - 1, 95, 22); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
     text(ctx, s.k, x + 20, chy + 18, { kind: 'mono', size: 12, color: C.grey, ls: 2.6 });
     const col = s.tone === 'good' ? OUT.win.deep : s.tone === 'bad' ? OUT.loss.deep : C.ink;
@@ -688,7 +736,7 @@ function renderTrades(data, page = 0) {
   const won = Math.max(0, data.grossWin || 0), lost = Math.abs(data.grossLoss || 0), tot = won + lost;
   text(ctx, `WON ${formatDollars(won, { symbol: sym, sign: false })}`, bx, by - 2, { kind: 'mono', size: 13, color: OUT.win.deep, ls: 2 });
   text(ctx, `LOST ${formatDollars(lost, { symbol: sym, sign: false })}`, bx + bw, by - 2, { kind: 'mono', size: 13, color: OUT.loss.deep, align: 'right', ls: 2 });
-  rr(ctx, bx, by + 20, bw, 12, 6); ctx.fillStyle = `rgba(${C.shadow},.08)`; ctx.fill();
+  rr(ctx, bx, by + 20, bw, 12, 6); ctx.fillStyle = `rgba(${C.grid},.08)`; ctx.fill();
   if (tot > 0) {
     const split = bw * (won / tot);
     ctx.save(); rr(ctx, bx, by + 20, bw, 12, 6); ctx.clip();
@@ -697,14 +745,14 @@ function renderTrades(data, page = 0) {
     ctx.restore();
     // the knob sits on the split
     shadowed(ctx, () => { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(bx + split, by + 26, 11, 0, Math.PI * 2); ctx.fill(); }, { blur: 10, y: 4, alpha: 0.2 });
-    ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(bx + split, by + 26, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#15171c'; ctx.beginPath(); ctx.arc(bx + split, by + 26, 4.5, 0, Math.PI * 2); ctx.fill();
   }
   let sx = W - PAD;
   for (const s of [...(data.symbols || [])].reverse()) {
     const lbl = `${s.symbol} ×${s.n}`, pv = formatDollars(s.pnl, { symbol: sym });
     const w1 = measure(ctx, lbl, 'inter', 15, 700, 0.2), w2 = measure(ctx, pv, 'mono', 13), cw = 18 + w1 + 10 + w2 + 18;
     sx -= cw;
-    rr(ctx, sx, by + 4, cw, 40, 20); ctx.fillStyle = C.ink; ctx.fill();
+    rr(ctx, sx, by + 4, cw, 40, 20); ctx.fillStyle = C.capsule; ctx.fill();
     text(ctx, lbl, sx + 18, by + 16, { size: 15, weight: 700, color: '#ffffff', ls: 0.2 });
     text(ctx, pv, sx + 18 + w1 + 10, by + 17.5, { kind: 'mono', size: 13, color: OUT[toneOf(s.pnl)].hex });
     sx -= 10;
@@ -818,4 +866,47 @@ function renderTrades(data, page = 0) {
   return { buffer: canvas.toBuffer('image/png'), page: pg, pages };
 }
 
-module.exports = { renderWeekly, renderMonthly, renderDaily, renderTrades, tradePages, ensureFonts };
+/**
+ * The Appearance page's preview: the same day drawn in Studio and in Night,
+ * side by side on a floor that is half day, half night, with the one in use
+ * marked. active: 'light' | 'dark' | 'auto' (auto marks both, "by the clock").
+ */
+function renderThemeSwatch(day, active = 'light') {
+  ensureFonts();
+  const SW = 1180, SH = 812, cw = 540, ch = 675, top = 40;
+  const canvas = createCanvas(SW * SCALE, SH * SCALE), ctx = canvas.getContext('2d');
+  ctx.scale(SCALE, SCALE);
+  // the floor: day on the left melting into night on the right
+  const g = ctx.createLinearGradient(0, 0, SW, 0);
+  g.addColorStop(0, THEMES.light.floor2); g.addColorStop(0.47, THEMES.light.floor); g.addColorStop(0.53, THEMES.dark.floor); g.addColorStop(1, THEMES.dark.floor2);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, SW, SH);
+  const sides = [['light', 'STUDIO', 40], ['dark', 'NIGHT', SW - 40 - cw]];
+  for (const [theme, name, x] of sides) {
+    const img = withTheme(theme, toneFor(day.total, !(day.trades || []).some((t) => t.outcome !== 'missed')), () => renderDaily(day, true));
+    const on = active === theme || active === 'auto';
+    ctx.save();
+    ctx.shadowColor = theme === 'dark' ? 'rgba(0,0,0,.6)' : 'rgba(26,33,51,.22)'; ctx.shadowBlur = 30 * SCALE; ctx.shadowOffsetY = 14 * SCALE;
+    rr(ctx, x, top, cw, ch, 22); ctx.fillStyle = theme === 'dark' ? THEMES.dark.floor : THEMES.light.floor; ctx.fill(); ctx.restore();
+    ctx.save(); rr(ctx, x, top, cw, ch, 22); ctx.clip(); ctx.drawImage(img, x, top, cw, ch); ctx.restore();
+    if (on) { rr(ctx, x - 6, top - 6, cw + 12, ch + 12, 27); ctx.strokeStyle = active === 'auto' ? 'rgba(121,131,255,.85)' : `rgba(${OUT.win.rgb},.9)`; ctx.lineWidth = 3; ctx.stroke(); }
+    const ink = theme === 'dark' ? THEMES.dark.ink : THEMES.light.ink, grey = theme === 'dark' ? THEMES.dark.grey : THEMES.light.grey;
+    const ly = top + ch + 34, lw = measure(ctx, name, 'mono', 16, 400, 5);
+    const label = on ? (active === 'auto' ? (theme === 'light' ? 'BY DAY' : 'AFTER 7 PM') : 'IN USE') : '';
+    const total = 22 + lw + (label ? 18 + measure(ctx, label, 'mono', 13, 400, 3) : 0), lx = x + cw / 2 - total / 2;
+    ctx.fillStyle = on ? (active === 'auto' ? '#7983ff' : OUT.win.hex) : grey; ctx.beginPath(); ctx.arc(lx + 6, ly + 8, 5, 0, Math.PI * 2);
+    if (on) ctx.fill(); else { ctx.lineWidth = 1.6; ctx.strokeStyle = grey; ctx.stroke(); }
+    text(ctx, name, lx + 22, ly, { kind: 'mono', size: 16, color: on ? ink : grey, ls: 5 });
+    if (label) text(ctx, label, lx + 22 + lw + 18, ly + 2, { kind: 'mono', size: 13, color: grey, ls: 3 });
+  }
+  return canvas.toBuffer('image/png');
+}
+
+// each card in a theme: opts.theme 'light' (default) | 'dark'
+const weeklyEmpty = (w) => !w.days?.some((d) => d.trades > 0) && !(w.weekend && w.weekend.trades);
+module.exports = {
+  renderWeekly: (week, { theme } = {}) => withTheme(theme, toneFor(week.total, weeklyEmpty(week)), () => renderWeekly(week)),
+  renderMonthly: (month, { theme } = {}) => withTheme(theme, toneFor(month.total, !Object.values(month.data || {}).some((d) => d.trades > 0)), () => renderMonthly(month)),
+  renderDaily: (day, { theme } = {}) => withTheme(theme, toneFor(day.total, !(day.trades || []).some((t) => t.outcome !== 'missed')), () => renderDaily(day)),
+  renderTrades: (data, page = 0, { theme } = {}) => withTheme(theme, toneFor(data.net, !data.count), () => renderTrades(data, page)),
+  renderThemeSwatch, tradePages, ensureFonts, THEMES,
+};

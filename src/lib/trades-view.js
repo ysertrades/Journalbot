@@ -12,6 +12,7 @@ const {
 const { DateTime } = require('luxon');
 const { tradesData } = require('./pnl');
 const { renderTrades } = require('./renderer');
+const { resolveTheme } = require('./theme');
 const { formatDollars } = require('./money');
 const { NEUTRAL_COLOR, totalColor } = require('./format');
 
@@ -44,7 +45,7 @@ function tradesMessage(guildId, settings, range, page = 0, anchor = null) {
   const tz = settings.timezone;
   const day = anchor || DateTime.now().setZone(tz).toISODate();
   const data = tradesData(guildId, range, tz, settings.currency, day);
-  const img = renderTrades(data, page);
+  const img = renderTrades(data, page, { theme: resolveTheme(settings) });
   const name = `trades-${range}-${data.start}-p${img.page + 1}.png`;
   const c = new ContainerBuilder().setAccentColor(data.count ? totalColor(data.net) : NEUTRAL_COLOR);
   c.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${name}`)));
