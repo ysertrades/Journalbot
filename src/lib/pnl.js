@@ -126,4 +126,61 @@ function dayData(guildId, isoDate, tz, symbol = '$') {
   };
 }
 
-module.exports = { weekData, monthData, dayData };
+/**
+ * Every trade in a period, as a list, for /trades.
+ * range: 'day' | 'week' (Mon-Sun) | 'month'; anchorISO: a date inside it (YYYY-MM-DD in tz).
+ */
+function tradesData(guildId, range, tz, symbol = '$', anchorISO = DateTime.now().setZone(tz).toISODate()) {
+  const a = DateTime.fromISO(anchorISO, { zone: tz });
+  const start = range === 'month' ? a.startOf('month') : range === 'week' ? a.startOf('week') : a.startOf('day');
+  const end = range === 'month' ? a.endOf('month') : range === 'week' ? start.plus({ days: 6 }) : start;
+  const rows = pnlBetween(guildId, start.toISODate(), end.toISODate());
+  const details = entryDetailsFor(rows.map((r) => r.thread_id));
+  const trades = rows.map((r) => {
+    const d = details[r.thread_id] || {};
+    let f = {}; try { f = d.fields_json ? JSON.parse(d.fields_json) : {}; } catch { f = {}; }
+    const at = Number(f._at) || null;           // the real trade time, known for imported trades
+    return {
+      key: r.thread_id, date: r.date_local, outcome: r.outcome, pnl: r.outcome === 'missed' ? 0 : r.pnl_cents / 100,
+      potential: r.potential_cents != null ? r.potential_cents / 100 : null,
+      instrument: d.instrument || null, direction: d.direction || null, r: typeof d.r_multiple === 'number' ? d.r_multiple : null,
+      setup: d.setup || null, entry: d.entry || null, exit: d.exit || null, qty: f._qty || null, held: f._held || null,
+      time: at ? DateTime.fromMillis(at, { zone: tz }).toFormat('HH:mm') : null,
+      sort: `${r.date_local} ${at ? String(at).padStart(15, '0') : String(d.created_at || r.updated_at || 0).padStart(15, '0')}`,
+    };
+  }).sort((x, y) => (x.sort < y.sort ? -1 : x.sort > y.sort ? 1 : 0));
+
+  const counted = trades.filter((t) => t.outcome !== 'missed');
+  const wins = counted.filter((t) => t.pnl > 0), losses = counted.filter((t) => t.pnl < 0);
+  const sum = (xs) => xs.reduce((s, t) => s + t.pnl, 0);
+  const grossWin = sum(wins), grossLoss = sum(losses), net = sum(counted);
+  let streak = 0, run = 0;
+  for (const t of counted) { run = t.pnl > 0 ? run + 1 : 0; streak = Math.max(streak, run); }
+  const rs = counted.filter((t) => typeof t.r === 'number' && !Number.isNaN(t.r));
+  const bySym = {};
+  for (const t of counted) { const k = t.instrument || '—'; (bySym[k] ||= { symbol: k, n: 0, pnl: 0 }); bySym[k].n += 1; bySym[k].pnl += t.pnl; }
+  const longs = counted.filter((t) => /^l/i.test(t.direction || '')), shorts = counted.filter((t) => /^s/i.test(t.direction || ''));
+  const label = range === 'day'
+    ? start.setLocale('en').toFormat('cccc, LLL d').toUpperCase()
+    : range === 'week' ? `${start.setLocale('en').toFormat('LLL d').toUpperCase()} – ${end.setLocale('en').toFormat(start.month === end.month ? 'd' : 'LLL d').toUpperCase()}, ${end.year}`
+      : start.setLocale('en').toFormat('LLLL yyyy').toUpperCase();
+  const today = DateTime.now().setZone(tz).toISODate();
+  const lead = range === 'day' ? (start.toISODate() === today ? 'Today' : start.setLocale('en').toFormat('cccc'))
+    : range === 'week' ? (start.toISODate() === DateTime.now().setZone(tz).startOf('week').toISODate() ? 'This week' : `Week ${start.weekNumber}`)
+      : start.setLocale('en').toFormat('LLLL');
+  return {
+    kind: 'trades', range, start: start.toISODate(), end: end.toISODate(), label, lead, symbol,
+    trades, count: counted.length, w: wins.length, l: losses.length, be: counted.length - wins.length - losses.length,
+    missed: trades.length - counted.length, net, grossWin, grossLoss,
+    winRate: counted.length ? Math.round((100 * wins.length) / counted.length) : null,
+    profitFactor: grossLoss ? grossWin / Math.abs(grossLoss) : (grossWin ? Infinity : null),
+    avgWin: wins.length ? grossWin / wins.length : null, avgLoss: losses.length ? grossLoss / losses.length : null,
+    best: counted.length ? counted.reduce((x, y) => (y.pnl > x.pnl ? y : x)) : null,
+    worst: counted.length ? counted.reduce((x, y) => (y.pnl < x.pnl ? y : x)) : null,
+    streak, rSum: rs.length ? rs.reduce((s, t) => s + t.r, 0) : null,
+    symbols: Object.values(bySym).sort((x, y) => y.n - x.n || y.pnl - x.pnl).slice(0, 4),
+    longs: { n: longs.length, pnl: sum(longs) }, shorts: { n: shorts.length, pnl: sum(shorts) },
+  };
+}
+
+module.exports = { weekData, monthData, dayData, tradesData };

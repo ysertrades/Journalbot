@@ -102,4 +102,4 @@ async function postJournal({ guild, draft, settings }) {
   return { thread, messageId, existing: !!threadId, usedV2, tagApplied };
 }
 
-module.exports = { postJournal, validateImage, imageRecord };
+module.exports = { postJournal, validateImage, imageRecord, downloadImage, FORUM_TYPES };

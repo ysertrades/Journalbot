@@ -355,4 +355,4 @@ function pickPanel({ key, forumId, posts, page, settings }) {
   return c;
 }
 
-module.exports = { pickPanel, describeTarget, journalPanel, csvModal, csvPreviewPanel, csvProgressCard, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS };
+module.exports = { pickPanel, describeTarget, journalPanel, summaryTrade, summaryResult, summaryNotes, csvModal, csvPreviewPanel, csvProgressCard, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS };
