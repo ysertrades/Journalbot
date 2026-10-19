@@ -6,7 +6,7 @@ const { parseMoney, parseR, applyOutcomeSign, formatCents, formatDollars, format
 const { buildPostBody, threadTitle } = require('../src/lib/format');
 const { parseText, resolveEntry, tagToOutcome } = require('../src/lib/parse');
 const db = require('../src/lib/db');
-const { weekData, monthData } = require('../src/lib/pnl');
+const { weekData, monthData, dayData } = require('../src/lib/pnl');
 
 test('money parsing', () => {
   assert.equal(parseMoney('1,250.50'), 125050);
@@ -139,4 +139,19 @@ test('drafts expire and persist', () => {
   assert.equal(db.getDraft(d.id).fields.instrument, 'NQ');
   db.db.prepare('UPDATE journal_drafts SET expires_at = 1 WHERE draft_id = ?').run(d.id);
   assert.equal(db.getDraft(d.id), null);
+});
+
+test('dayData: one day, its trades in order, totals and the week around it', () => {
+  db.upsertPnl({ thread_id: 'd1', container_id: 'd1', guild_id: 'gd', forum_id: 'F', outcome: 'win', pnl_cents: 125000, date_local: '2026-10-15', updated_at: 1 });
+  db.upsertPnl({ thread_id: 'd2', container_id: 'd2', guild_id: 'gd', forum_id: 'F', outcome: 'loss', pnl_cents: -31000, date_local: '2026-10-15', updated_at: 2 });
+  db.upsertPnl({ thread_id: 'd3', container_id: 'd3', guild_id: 'gd', forum_id: 'F', outcome: 'missed', pnl_cents: 0, potential_cents: 90000, date_local: '2026-10-15', updated_at: 3 });
+  db.upsertPnl({ thread_id: 'd4', container_id: 'd4', guild_id: 'gd', forum_id: 'F', outcome: 'win', pnl_cents: 5000, date_local: '2026-10-13', updated_at: 4 });
+  const d = dayData('gd', '2026-10-15', 'America/New_York');
+  assert.equal(d.weekday, 'Thursday'); assert.equal(d.dateLabel, 'OCT 15, 2026');
+  assert.equal(d.total, 940); assert.equal(d.count, 2); assert.equal(d.w, 1); assert.equal(d.l, 1); assert.equal(d.missed, 1);
+  assert.deepEqual(d.trades.map((t) => t.key), ['d1', 'd2', 'd3']);
+  assert.equal(d.trades[2].potential, 900); assert.equal(d.best.key, 'd1');
+  assert.equal(d.week.length, 5); assert.equal(d.week.find((x) => x.today).day, 'THU'); assert.equal(d.weekTotal, 990);
+  const empty = dayData('gd', '2026-10-17', 'America/New_York');
+  assert.equal(empty.count, 0); assert.equal(empty.trades.length, 0); assert.equal(empty.winRate, null);
 });

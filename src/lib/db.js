@@ -193,6 +193,19 @@ function deletePnl(threadId) { return db.prepare('DELETE FROM pnl_entries WHERE 
 function pnlBetween(guildId, startISO, endISO) {
   return db.prepare('SELECT * FROM pnl_entries WHERE guild_id=? AND date_local>=? AND date_local<=? ORDER BY date_local').all(guildId, startISO, endISO);
 }
+/**
+ * The journal details (instrument, direction, R, when it was logged) behind
+ * each PnL key, for the daily card. A key is a message id (a trade inside an
+ * existing post) or a post id (one trade per post). Trades typed by hand have
+ * no journal_entries row and simply come back without details.
+ */
+function entryDetailsFor(keys) {
+  const byMsg = db.prepare('SELECT instrument, direction, r_multiple, session, setup, created_at FROM journal_entries WHERE message_id = ? ORDER BY created_at DESC LIMIT 1');
+  const byThread = db.prepare('SELECT instrument, direction, r_multiple, session, setup, created_at FROM journal_entries WHERE thread_id = ? ORDER BY created_at ASC LIMIT 1');
+  const out = {};
+  for (const k of keys) { const r = byMsg.get(k) || byThread.get(k); if (r) out[k] = r; }
+  return out;
+}
 function pnlRowsForForum(guildId, forumId) {
   return db.prepare('SELECT thread_id, container_id FROM pnl_entries WHERE guild_id=? AND forum_id=?').all(guildId, forumId);
 }
@@ -222,4 +235,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };

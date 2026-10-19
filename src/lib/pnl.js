@@ -1,6 +1,6 @@
 'use strict';
 const { DateTime } = require('luxon');
-const { pnlBetween } = require('./db');
+const { pnlBetween, entryDetailsFor } = require('./db');
 const { formatDollars } = require('./money');
 
 const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
@@ -88,4 +88,42 @@ function monthData(guildId, year, month, tz, symbol = '$') {
   };
 }
 
-module.exports = { weekData, monthData };
+/**
+ * One day: every trade in order (with its journal details when the bot
+ * logged it), the day's totals, and the week around it for context.
+ * isoDate: YYYY-MM-DD in tz.
+ */
+function dayData(guildId, isoDate, tz, symbol = '$') {
+  const dt = DateTime.fromISO(isoDate, { zone: tz });
+  const rows = pnlBetween(guildId, isoDate, isoDate);
+  const details = entryDetailsFor(rows.map((r) => r.thread_id));
+  const trades = rows.map((r) => {
+    const d = details[r.thread_id] || {};
+    return {
+      key: r.thread_id, outcome: r.outcome, pnl: r.outcome === 'missed' ? 0 : r.pnl_cents / 100,
+      potential: r.potential_cents != null ? r.potential_cents / 100 : null,
+      instrument: d.instrument || null, direction: d.direction || null, r: d.r_multiple ?? null,
+      setup: d.setup || null, at: d.created_at || r.updated_at || 0,
+    };
+  }).sort((a, b) => a.at - b.at);
+  const b = emptyBucket();
+  for (const r of rows) addTo(b, r);
+  const counted = trades.filter((t) => t.outcome !== 'missed');
+  const rSum = counted.reduce((s, t) => s + (typeof t.r === 'number' && !Number.isNaN(t.r) ? t.r : 0), 0);
+  const hasR = counted.some((t) => typeof t.r === 'number' && !Number.isNaN(t.r));
+  const best = counted.length ? counted.reduce((a, c) => (c.pnl > a.pnl ? c : a)) : null;
+  // the week around it (Mon-Fri), for the strip at the bottom
+  const wk = weekData(guildId, isoDate, tz, symbol);
+  return {
+    kind: 'daily', date: isoDate, symbol,
+    weekday: dt.setLocale('en').toFormat('cccc'),
+    dateLabel: dt.setLocale('en').toFormat('LLL d, yyyy').toUpperCase(),
+    trades, total: b.pnl, count: b.trades, w: b.w, l: b.l, be: b.be, missed: b.missed,
+    winRate: b.trades ? Math.round((100 * b.w) / b.trades) : null,
+    rSum: hasR ? rSum : null, best,
+    week: wk.days.map((d) => ({ day: d.day, pnl: d.pnl, trades: d.trades, today: d.iso === isoDate })),
+    weekTotal: wk.total,
+  };
+}
+
+module.exports = { weekData, monthData, dayData };

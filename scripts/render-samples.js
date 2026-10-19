@@ -22,4 +22,26 @@ const data = {}; for (const [d, [p, n]] of Object.entries(sep)) data[d] = { pnl:
 const total = Object.values(data).reduce((s, d) => s + d.pnl, 0);
 fs.writeFileSync(path.join(out, 'monthly.png'), renderMonthly({ kind: 'monthly', year: 2026, month: 9, monthLabel: 'SEPTEMBER 2026', monthShort: 'SEP', data, total, symbol: '$', stats: [
   { k: 'WIN RATE', v: '60%' }, { k: 'G \u00b7 R \u00b7 BE', v: '12 \u00b7 7 \u00b7 1' }, { k: 'BEST DAY', v: '+$2,310', tone: 'good' }, { k: 'WORST DAY', v: '\u2212$690', tone: 'bad' }, { k: 'AVG / DAY', v: '+$529' }, { k: 'MISSED', v: '5' } ] }));
+// daily cards (4:5)
+const { renderDaily } = require('../src/lib/renderer');
+const T = (instrument, direction, outcome, pnl, r, setup, potential = null) => ({ instrument, direction, outcome, pnl, r, setup, potential, at: 0 });
+const dayOf = (trades, weekday, dateLabel, week) => {
+  const counted = trades.filter((t) => t.outcome !== 'missed');
+  const total = counted.reduce((s, t) => s + t.pnl, 0), w = counted.filter((t) => t.pnl > 0).length, l = counted.filter((t) => t.pnl < 0).length;
+  const rs = counted.filter((t) => typeof t.r === 'number');
+  return { kind: 'daily', symbol: '$', weekday, dateLabel, trades, total, count: counted.length, w, l, be: counted.length - w - l,
+    missed: trades.length - counted.length, winRate: counted.length ? Math.round((100 * w) / counted.length) : null,
+    rSum: rs.length ? rs.reduce((s, t) => s + t.r, 0) : null, best: counted.length ? counted.reduce((a, b) => (b.pnl > a.pnl ? b : a)) : null,
+    week, weekTotal: week.reduce((s, d) => s + d.pnl, 0) };
+};
+const wk = (today, vals) => ['MON', 'TUE', 'WED', 'THU', 'FRI'].map((d, i) => ({ day: d, pnl: vals[i], trades: vals[i] ? 1 : 0, today: i === today }));
+fs.writeFileSync(path.join(out, 'daily-green.png'), renderDaily(dayOf([
+  T('NQ', 'Long', 'win', 1240, 2.5, 'London open sweep'), T('ES', 'Short', 'loss', -310, -1, 'Failed breakdown'),
+  T('NQ', 'Long', 'win', 980, 2, 'NY AM continuation'), T('YM', 'Short', 'win', 240, 0.8, 'Lunch fade'),
+], 'Thursday', 'OCT 15, 2026', wk(3, [1240, -480, 0, 2150, 0]))));
+fs.writeFileSync(path.join(out, 'daily-red.png'), renderDaily(dayOf([
+  T('ES', 'Long', 'loss', -620, -1, 'Chased the open'), T('NQ', 'Short', 'win', 180, 0.6, 'Quick scalp'),
+  T('NQ', null, 'missed', 0, null, 'Hesitated on the retest', 1450), T(null, null, 'loss', -540, null, null),
+], 'Tuesday', 'OCT 13, 2026', wk(1, [620, -980, 0, 0, 0]))));
+fs.writeFileSync(path.join(out, 'daily-empty.png'), renderDaily(dayOf([], 'Saturday', 'OCT 17, 2026', wk(-1, [1240, -480, 0, 2150, 420]))));
 console.log('rendered to', out);

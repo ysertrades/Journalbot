@@ -4,8 +4,8 @@ const {
 } = require('discord.js');
 const { DateTime } = require('luxon');
 const { getSettings, listConfiguredGuilds, claimReport, finishReport, getReport } = require('./db');
-const { weekData, monthData } = require('./pnl');
-const { renderWeekly, renderMonthly } = require('./renderer');
+const { weekData, monthData, dayData } = require('./pnl');
+const { renderWeekly, renderMonthly, renderDaily } = require('./renderer');
 const { scanGuild } = require('./scanner');
 const { formatDollars } = require('./money');
 const { totalColor } = require('./format');
@@ -22,6 +22,12 @@ function monthlyImage(guildId, year, month, settings) {
   const wr = data.tradedDays ? `${Math.round((100 * data.green) / data.tradedDays)}% green days` : 'no trades logged';
   const summary = `**${data.monthLabel.charAt(0)}${data.monthLabel.slice(1).toLowerCase()}** · ${formatDollars(data.total, { symbol: settings.currency })} · ${data.tradedDays} trading days · ${wr}`;
   return { buffer: renderMonthly(data), name: `monthly-pnl-${year}-${String(month).padStart(2, '0')}.png`, summary, data };
+}
+
+function dailyImage(guildId, isoDate, settings) {
+  const data = dayData(guildId, isoDate, settings.timezone, settings.currency);
+  const summary = `**${data.weekday}** · ${formatDollars(data.total, { symbol: settings.currency })} · ${data.count ? `${data.count} trade${data.count === 1 ? '' : 's'} · ${data.winRate}% win rate` : 'no trades logged'}`;
+  return { buffer: renderDaily(data), name: `daily-pnl-${isoDate}.png`, summary, data };
 }
 
 function reportMessage(img, settings, { late } = {}) {
@@ -108,4 +114,4 @@ async function tick(client) {
   } finally { ticking = false; }
 }
 
-module.exports = { weeklyImage, monthlyImage, postNow, sendReport, dueJobs, isDue, tick, reportMessage };
+module.exports = { weeklyImage, monthlyImage, dailyImage, postNow, sendReport, dueJobs, isDue, tick, reportMessage };

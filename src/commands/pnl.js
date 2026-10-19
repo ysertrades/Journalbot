@@ -7,7 +7,7 @@ const { DateTime } = require('luxon');
 const { getSettings, getPnlEntry } = require('../lib/db');
 const { canConfigure, isAllowed } = require('../lib/permissions');
 const { scanGuild, summaryText } = require('../lib/scanner');
-const { weeklyImage, monthlyImage, reportMessage } = require('../lib/reports');
+const { weeklyImage, monthlyImage, dailyImage, reportMessage } = require('../lib/reports');
 const { allForums, ledgerThreads } = require('../lib/routing');
 const { parseDateInput, formatCents } = require('../lib/money');
 const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
@@ -20,6 +20,8 @@ class PnlCommand extends Command {
     const guildIds = process.env.GUILD_ID ? [process.env.GUILD_ID] : undefined;
     registry.registerChatInputCommand((b) => b.setName('pnl').setDescription('Journal PnL images')
       .setContexts(InteractionContextType.Guild).setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
+      .addSubcommand((s) => s.setName('day').setDescription('Daily PnL card, 4:5 (only visible to you)')
+        .addStringOption((o) => o.setName('date').setDescription('e.g. 2026-10-14, yesterday (default: today)')))
       .addSubcommand((s) => s.setName('week').setDescription('Weekly PnL image (only visible to you)')
         .addStringOption((o) => o.setName('date').setDescription('Any date inside the week, e.g. 2026-10-14 (default: this week)')))
       .addSubcommand((s) => s.setName('month').setDescription('Monthly PnL image (only visible to you)')
@@ -44,7 +46,12 @@ class PnlCommand extends Command {
       }
       await scanGuild(interaction.guild, settings);
       let img;
-      if (sub === 'week') {
+      if (sub === 'day') {
+        const d = interaction.options.getString('date');
+        const iso = d ? parseDateInput(d, settings.timezone) : DateTime.now().setZone(settings.timezone).toISODate();
+        if (!iso) return await show({ components: [card('Could not read that date. Try `2026-10-14` or `yesterday`.', WARN_COLOR)] });
+        img = dailyImage(interaction.guildId, iso, settings);
+      } else if (sub === 'week') {
         const d = interaction.options.getString('date');
         const iso = d ? parseDateInput(d, settings.timezone) : DateTime.now().setZone(settings.timezone).toISODate();
         if (!iso) return await show({ components: [card('Could not read that date. Try `2026-10-14`.', WARN_COLOR)] });
