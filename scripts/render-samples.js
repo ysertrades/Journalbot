@@ -43,5 +43,8 @@ fs.writeFileSync(path.join(out, 'daily-red.png'), renderDaily(dayOf([
   T('ES', 'Long', 'loss', -620, -1, 'Chased the open'), T('NQ', 'Short', 'win', 180, 0.6, 'Quick scalp'),
   T('NQ', null, 'missed', 0, null, 'Hesitated on the retest', 1450), T(null, null, 'loss', -540, null, null),
 ], 'Tuesday', 'OCT 13, 2026', wk(1, [620, -980, 0, 0, 0]))));
+// a busy day: dense curve labels and more symbols than the book row fits
+const busy = ['NQ', 'NQ', 'ES', 'MNQ', 'NQ', 'CL', 'GC', 'ES', 'NQ', 'RTY', 'NQ', 'YM', 'NQ', 'ES'].map((s, i) => T(s, i % 2 ? 'Short' : 'Long', i % 3 === 2 ? 'loss' : 'win', i % 3 === 2 ? -180 - i * 10 : 120 + i * 35, null, null));
+fs.writeFileSync(path.join(out, 'daily-busy.png'), renderDaily(dayOf(busy, 'Wednesday', 'OCT 14, 2026', wk(2, [620, -980, 1890, 0, 0]))));
 fs.writeFileSync(path.join(out, 'daily-empty.png'), renderDaily(dayOf([], 'Saturday', 'OCT 17, 2026', wk(-1, [1240, -480, 0, 2150, 420]))));
 console.log('rendered to', out);
