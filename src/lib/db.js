@@ -203,8 +203,8 @@ function pnlBetween(guildId, startISO, endISO) {
  * no journal_entries row and simply come back without details.
  */
 function entryDetailsFor(keys) {
-  const byMsg = db.prepare('SELECT instrument, direction, r_multiple, session, setup, created_at FROM journal_entries WHERE message_id = ? ORDER BY created_at DESC LIMIT 1');
-  const byThread = db.prepare('SELECT instrument, direction, r_multiple, session, setup, created_at FROM journal_entries WHERE thread_id = ? ORDER BY created_at ASC LIMIT 1');
+  const byMsg = db.prepare('SELECT instrument, direction, r_multiple, session, setup, entry, exit, fields_json, created_at FROM journal_entries WHERE message_id = ? ORDER BY created_at DESC LIMIT 1');
+  const byThread = db.prepare('SELECT instrument, direction, r_multiple, session, setup, entry, exit, fields_json, created_at FROM journal_entries WHERE thread_id = ? ORDER BY created_at ASC LIMIT 1');
   const out = {};
   for (const k of keys) { const r = byMsg.get(k) || byThread.get(k); if (r) out[k] = r; }
   return out;

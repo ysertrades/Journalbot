@@ -203,7 +203,7 @@ function readTrades(text, tz) {
     seen.add(hash);
     trades.push({
       hash, keys, extId: ext || null, outcome, instrument, direction: side || 'Long', qty: qty !== null ? Math.abs(qty) : null,
-      entry: fmtPrice(entry), exit: fmtPrice(exit), date: tDay.toISODate(), at: tDay.toMillis(),
+      entry: fmtPrice(entry), exit: fmtPrice(exit), date: tDay.toISODate(), at: tDay.toMillis(), opened: tIn ? tIn.toMillis() : null,
       pnl_cents: cents, fee_cents: Math.round(feesTotal * 100), held: tIn && tOut ? duration(tOut.toMillis() - tIn.toMillis()) : null,
       sideGuessed: !side,
     });
@@ -218,7 +218,7 @@ function toFields(t, { tag } = {}) {
   const bits = [t.qty ? `${t.qty} contract${t.qty === 1 ? '' : 's'}` : null, t.exit ? `exit ${t.exit}` : null, t.held ? `held ${t.held}` : null, t.fee_cents ? `fees $${(t.fee_cents / 100).toFixed(2)}` : null];
   return {
     instrument: t.instrument, direction: t.direction, date: t.date, entry: t.entry || undefined, exit: t.exit || undefined,
-    pnl_cents: t.pnl_cents, setup: tag || 'Imported from CSV', why: `Imported · ${bits.filter(Boolean).join(' · ') || 'from your CSV'}`,
+    pnl_cents: t.pnl_cents, _at: t.opened || t.at, _qty: t.qty || undefined, _held: t.held || undefined, setup: tag || 'Imported from CSV', why: `Imported · ${bits.filter(Boolean).join(' · ') || 'from your CSV'}`,
   };
 }
 
