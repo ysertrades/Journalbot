@@ -115,8 +115,16 @@ function csvPreviewPanel(draft, guild, settings, imp, { sparkline }) {
   const color = total > 0 ? OUTCOMES.win.color : total < 0 ? OUTCOMES.loss.color : OUTCOMES.be.color;
   const c = new ContainerBuilder().setAccentColor(tr.length ? color : NEUTRAL_COLOR);
   c.addTextDisplayComponents(td(`# \u{1F4E5} Import preview\n-# ${imp.file} · ${imp.format}${imp.truncated ? ' · first 1000 rows' : ''}`));
+  // the dedupe ledger: what's new against what the journal already holds
+  const manual = imp.manual || [], seenAll = (imp.dupes || 0) + manual.length;
+  const ledger = [`✨ **${tr.length} new**`];
+  if (imp.dupes) ledger.push(`♻️ ${imp.dupes} already imported`);
+  if (manual.length) ledger.push(`✋ ${manual.length} already journaled by hand`);
+  const run = imp.lastRun;
+  const since = run ? `\n-# \u{1F9ED} Last import <t:${Math.floor(run.at / 1000)}:R> · ${run.count} trade${run.count === 1 ? '' : 's'}${run.last_trade_at ? ` up to <t:${Math.floor(run.last_trade_at / 1000)}:f>` : ''}${seenAll ? '. Matching trades are skipped, only what\'s new is added.' : ''}` : '\n-# First import into this journal.';
+  c.addTextDisplayComponents(td(`${ledger.join('  ·  ')}${since}${imp.withId ? '\n-# Matched by your broker\'s trade IDs' : seenAll ? '\n-# Matched by symbol, side, size and entry/exit time, so a re-export with rounding or fee changes still matches' : ''}`));
   if (!tr.length) {
-    c.addTextDisplayComponents(td(imp.dupes ? `Every trade in this file is already in your journal (${imp.dupes}). Nothing new to import.` : 'No trades could be read from this file.'));
+    c.addTextDisplayComponents(td(seenAll ? `You're up to date. Every trade in this file is already in your journal.` : 'No trades could be read from this file.'));
   } else {
     let run = 0; const curve = tr.map((t) => (run += t.pnl_cents));
     const first = tr[0].date, last = tr[tr.length - 1].date;
@@ -132,7 +140,7 @@ function csvPreviewPanel(draft, guild, settings, imp, { sparkline }) {
     c.addTextDisplayComponents(td(`-# Best ${best.instrument} ${money(best.pnl_cents)} · worst ${worst.instrument} ${money(worst.pnl_cents)}${tr.some((t) => t.sideGuessed) ? ' · side not in the file for some rows, shown as Long' : ''}`));
   }
   const notes = [];
-  if (imp.dupes) notes.push(`♻️ ${imp.dupes} already imported before, skipped`);
+  if (manual.length) notes.push(`✋ Held back, they match trades you posted yourself: ${manual.slice(0, 3).map((t) => `${t.instrument} ${formatDateDisplay(t.date).replace(/ \d{4}$/, '')} ${money(t.pnl_cents)}`).join(', ')}${manual.length > 3 ? '…' : ''}`);
   if (imp.skipped.length) {
     const why = {}; for (const s of imp.skipped) (why[s.why] ||= []).push(s.row);
     notes.push(`⏭️ ${imp.skipped.length} row${imp.skipped.length === 1 ? '' : 's'} skipped: ${Object.entries(why).map(([w, r]) => `${w} (row${r.length === 1 ? '' : 's'} ${r.slice(0, 4).join(', ')}${r.length > 4 ? '…' : ''})`).join('; ')}`);
@@ -141,6 +149,7 @@ function csvPreviewPanel(draft, guild, settings, imp, { sparkline }) {
   const postable = tr.filter((t) => routeTarget(settings, t.outcome)).length;
   c.addActionRowComponents(row(
     btn(`jr:${draft.id}:csvgo`, postable ? `Import ${postable} trade${postable === 1 ? '' : 's'}` : 'Nothing to import', ButtonStyle.Success, { disabled: !postable }),
+    ...(manual.length ? [btn(`jr:${draft.id}:csvinc`, `Include ${manual.length} hand-logged`)] : []),
     btn(`jr:${draft.id}:csv`, 'Choose another file'),
     btn(`jr:${draft.id}:csvback`, 'Back to journal'),
   ));

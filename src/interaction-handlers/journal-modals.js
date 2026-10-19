@@ -1,10 +1,31 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
-const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl, importedHashes } = require('../lib/db');
+const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl, importedHashes, journaledOn, lastImportRun } = require('../lib/db');
 const { journalPanel, csvPreviewPanel } = require('../lib/panels');
 const { readTrades, sparkline } = require('../lib/csv-import');
 
 const CSV_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Sorts a file's trades into: new, already imported (any identity key seen
+ * before: broker trade id, symbol/side/size/minute fingerprint, or the exact
+ * row), and ones that look journaled by hand already (same day, same symbol,
+ * PnL within $1 or 1%). Hand-logged lookalikes are held back, not dropped:
+ * the preview offers to include them.
+ */
+function classifyTrades(guildId, trades) {
+  const seen = importedHashes(guildId, trades.flatMap((t) => t.keys || [t.hash]));
+  const notImported = trades.filter((t) => !(t.keys || [t.hash]).some((k) => seen.has(k)));
+  const byDay = journaledOn(guildId, notImported.map((t) => t.date));
+  const fresh = [], manual = [];
+  for (const t of notImported) {
+    const pool = byDay[t.date] || [];
+    const tol = Math.max(100, Math.abs(t.pnl_cents) * 0.01);
+    const k = pool.findIndex((p) => (!p.instrument || p.instrument.toUpperCase() === t.instrument) && Math.abs(p.pnl_cents - t.pnl_cents) <= tol);
+    if (k >= 0) { pool.splice(k, 1); manual.push(t); } else fresh.push(t);   // each journal entry can only match one CSV trade
+  }
+  return { fresh, manual, dupes: trades.length - notImported.length };
+}
 const { isAllowed, canConfigure } = require('../lib/permissions');
 const { validateImage, imageRecord } = require('../lib/poster');
 const { parseMoney, parseR, applyOutcomeSign, parseDateInput, formatCents } = require('../lib/money');
@@ -94,10 +115,10 @@ class JournalModals extends InteractionHandler {
     } catch (e) { return back(`⚠️ Could not download the file (${e.message}). Try again.`); }
     const r = readTrades(text, settings.timezone);
     if (r.error) return back(`⚠️ ${r.error}`);
-    const seen = importedHashes(i.guildId, r.trades.map((t) => t.hash));
-    const fresh = r.trades.filter((t) => !seen.has(t.hash));
+    const { fresh, dupes, manual } = classifyTrades(i.guildId, r.trades);
     let tag = ''; try { tag = (i.fields.getTextInputValue('tag') || '').replace(/[`\n]/g, '').trim().slice(0, 60); } catch { /* optional */ }
-    draft.fields._import = { file: name.slice(0, 60), format: r.format, trades: fresh, dupes: r.trades.length - fresh.length, skipped: r.skipped.slice(0, 200), truncated: !!r.truncated };
+    draft.fields._import = { file: name.slice(0, 60), format: r.format, trades: fresh, manual, dupes, skipped: r.skipped.slice(0, 200), truncated: !!r.truncated,
+      lastRun: lastImportRun(i.guildId), withId: r.trades.some((t) => t.extId) };
     draft.fields._import_tag = tag || undefined;
     saveDraft(draft);
     const payload = { components: [csvPreviewPanel(draft, i.guild, settings, draft.fields._import, { sparkline })] };
@@ -119,4 +140,4 @@ class JournalModals extends InteractionHandler {
     return i.reply(ephemeral(card(`Saved ${formatCents(c, { symbol: settings.currency })} for <#${containerId}>.\n-# Used in weekly and monthly images. The message text itself is unchanged.`)));
   }
 }
-module.exports = { JournalModals };
+module.exports = { JournalModals, classifyTrades };

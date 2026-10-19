@@ -94,6 +94,7 @@ db.exec('UPDATE pnl_entries SET container_id = thread_id WHERE container_id IS N
 db.exec('CREATE INDEX IF NOT EXISTS idx_pnl_container ON pnl_entries (container_id)');
 // CSV imports: one row per trade already imported, so a file can be dropped twice safely
 db.exec('CREATE TABLE IF NOT EXISTS journal_imports (guild_id TEXT NOT NULL, hash TEXT NOT NULL, message_id TEXT, imported_at INTEGER NOT NULL, PRIMARY KEY (guild_id, hash))');
+db.exec('CREATE TABLE IF NOT EXISTS journal_import_runs (guild_id TEXT NOT NULL, at INTEGER NOT NULL, count INTEGER NOT NULL, last_trade_at INTEGER, file TEXT)');
 
 const DEFAULTS = {
   forums: [], default_forum_id: null, report_channel_id: null,
@@ -208,13 +209,33 @@ function entryDetailsFor(keys) {
   for (const k of keys) { const r = byMsg.get(k) || byThread.get(k); if (r) out[k] = r; }
   return out;
 }
-/** which of these trade hashes this server already imported */
+/** which of these trade keys this server already imported (a trade is a match if any of its keys is) */
 function importedHashes(guildId, hashes) {
   const q = db.prepare('SELECT 1 FROM journal_imports WHERE guild_id = ? AND hash = ?');
   return new Set(hashes.filter((h) => q.get(guildId, h)));
 }
-function markImported(guildId, hash, messageId) {
-  db.prepare('INSERT OR REPLACE INTO journal_imports (guild_id, hash, message_id, imported_at) VALUES (?,?,?,?)').run(guildId, hash, messageId || null, Date.now());
+/** remembers a trade under every identity key, so a reworded re-export still matches */
+function markImported(guildId, keys, messageId) {
+  const ins = db.prepare('INSERT OR REPLACE INTO journal_imports (guild_id, hash, message_id, imported_at) VALUES (?,?,?,?)');
+  for (const k of [].concat(keys)) ins.run(guildId, k, messageId || null, Date.now());
+}
+/** the last import into this server: when, how many, and the latest trade it held */
+function lastImportRun(guildId) { return db.prepare('SELECT * FROM journal_import_runs WHERE guild_id = ? ORDER BY at DESC LIMIT 1').get(guildId) || null; }
+function recordImportRun(guildId, { count, lastTradeAt, file }) {
+  db.prepare('INSERT INTO journal_import_runs (guild_id, at, count, last_trade_at, file) VALUES (?,?,?,?,?)').run(guildId, Date.now(), count, lastTradeAt || null, file || null);
+}
+/**
+ * Trades already in the journal on these days that did NOT come from an import
+ * (typed by hand, or posted with /journal), to spot the same trade arriving
+ * again from a CSV: { date: [{ instrument, pnl_cents }] }
+ */
+function journaledOn(guildId, dates) {
+  const q = db.prepare(`SELECT p.thread_id, p.pnl_cents, (SELECT e.instrument FROM journal_entries e WHERE e.message_id = p.thread_id OR e.thread_id = p.thread_id LIMIT 1) AS instrument
+    FROM pnl_entries p WHERE p.guild_id = ? AND p.date_local = ? AND p.outcome != 'missed'
+      AND p.thread_id NOT IN (SELECT message_id FROM journal_imports WHERE guild_id = ? AND message_id IS NOT NULL)`);
+  const out = {};
+  for (const d of new Set(dates)) out[d] = q.all(guildId, d, guildId).map((r) => ({ instrument: r.instrument || null, pnl_cents: r.pnl_cents }));
+  return out;
 }
 function pnlRowsForForum(guildId, forumId) {
   return db.prepare('SELECT thread_id, container_id FROM pnl_entries WHERE guild_id=? AND forum_id=?').all(guildId, forumId);
@@ -245,4 +266,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, lastImportRun, recordImportRun, journaledOn, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };

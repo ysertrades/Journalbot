@@ -1,9 +1,9 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
 const { ChannelType, ContainerBuilder, TextDisplayBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getSettings, getDraft, saveDraft, deleteDraft, markImported, importedHashes } = require('../lib/db');
-const { journalPanel, previewPanel, tradeModal, resultModal, notesModal, pictureModal, csvModal, csvProgressCard, isReady, missingParts } = require('../lib/panels');
-const { toFields } = require('../lib/csv-import');
+const { getSettings, getDraft, saveDraft, deleteDraft, markImported, importedHashes, recordImportRun } = require('../lib/db');
+const { journalPanel, previewPanel, tradeModal, resultModal, notesModal, pictureModal, csvModal, csvPreviewPanel, csvProgressCard, isReady, missingParts } = require('../lib/panels');
+const { toFields, sparkline } = require('../lib/csv-import');
 const { formatCents } = require('../lib/money');
 
 const IMPORT_PER_RUN = 400;   // stays well inside the 15-minute interaction window
@@ -57,6 +57,11 @@ class JournalComponents extends InteractionHandler {
     if (action === 'csvback') {
       delete draft.fields._import; delete draft.fields._importing; saveDraft(draft); return refresh();
     }
+    if (action === 'csvinc') {                          // add the hand-logged lookalikes back in
+      const imp = draft.fields._import; if (!imp) return refresh('That import expired. Upload the CSV again.');
+      imp.trades = [...imp.trades, ...(imp.manual || [])].sort((a, b) => a.at - b.at); imp.manual = [];
+      saveDraft(draft); return i.update({ components: [csvPreviewPanel(draft, i.guild, settings, imp, { sparkline })] });
+    }
     if (action === 'csvgo') return this.runImport(i, draft, settings);
     if (action === 'forum') {
       draft.forumId = i.values[0]; draft.fields._forum_manual = true; delete draft.fields._thread; saveDraft(draft); return refresh();
@@ -93,8 +98,9 @@ class JournalComponents extends InteractionHandler {
     if (draft.fields._importing && draft.fields._importing > Date.now() - 15 * 60 * 1000) return i.reply(ephemeral(card('This import is already running.', WARN_COLOR)));
     draft.fields._importing = Date.now(); saveDraft(draft);
     // a second upload of the same file may have finished in the meantime
-    const already = importedHashes(i.guildId, imp.trades.map((t) => t.hash));
-    const queue = imp.trades.filter((t) => !already.has(t.hash) && routeTarget(settings, t.outcome));
+    const keysOf = (t) => t.keys || [t.hash];
+    const already = importedHashes(i.guildId, imp.trades.flatMap(keysOf));
+    const queue = imp.trades.filter((t) => !keysOf(t).some((k) => already.has(k)) && routeTarget(settings, t.outcome));
     const batch = queue.slice(0, IMPORT_PER_RUN), left = queue.length - batch.length;
     const noDest = imp.trades.filter((t) => !routeTarget(settings, t.outcome)).length;
     await i.update({ components: [csvProgressCard(0, batch.length)] });
@@ -106,7 +112,7 @@ class JournalComponents extends InteractionHandler {
         fields: { ...toFields(t, { tag: draft.fields._import_tag }), ...(target.threadId ? { _thread: target.threadId } : {}) } };
       try {
         const { thread, messageId } = await postJournal({ guild: i.guild, draft: one, settings });
-        markImported(i.guildId, t.hash, messageId);
+        markImported(i.guildId, keysOf(t), messageId);
         done[t.outcome] += 1; net += t.pnl_cents;
         if (!dest.has(t.outcome)) dest.set(t.outcome, `https://discord.com/channels/${i.guildId}/${thread.id}${target.threadId ? `/${messageId}` : ''}`);
       } catch (e) {
@@ -120,6 +126,7 @@ class JournalComponents extends InteractionHandler {
     }
     delete draft.fields._import; delete draft.fields._importing; saveDraft(draft);
     const posted = done.win + done.loss + done.be;
+    if (posted) recordImportRun(i.guildId, { count: posted, lastTradeAt: Math.max(...batch.map((t) => t.at)), file: imp.file });
     const lines = [`# ${posted ? `Imported ${posted} trade${posted === 1 ? '' : 's'}` : 'Nothing was imported'}`];
     if (posted) lines.push(`## ${formatCents(net, { symbol: settings.currency })}`, [done.win && `\u{1F7E2} ${done.win} win${done.win === 1 ? '' : 's'}`, done.loss && `\u{1F534} ${done.loss} loss${done.loss === 1 ? '' : 'es'}`, done.be && `\u{1F7E1} ${done.be} breakeven`].filter(Boolean).join(' · '));
     const notes = [];
