@@ -4,7 +4,7 @@ const { ApplicationIntegrationType, InteractionContextType } = require('discord.
 const { getSettings } = require('../lib/db');
 const { settingsPanel } = require('../lib/panels');
 const { canConfigure } = require('../lib/permissions');
-const { card, ephemeral } = require('../lib/ui');
+const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 
 class JournalSettingsCommand extends Command {
   constructor(ctx, opts) { super(ctx, { ...opts, name: 'journal-settings', description: 'Configure the journal bot' }); }
@@ -15,7 +15,7 @@ class JournalSettingsCommand extends Command {
   }
   async chatInputRun(interaction) {
     if (!interaction.guild) return interaction.reply(ephemeral(card('Use this inside a server.')));
-    if (!canConfigure(interaction)) return interaction.reply(ephemeral(card('You need **Manage Server** to change journal settings.', 0xf87171)));
+    if (!canConfigure(interaction)) return interaction.reply(ephemeral(card('You need **Manage Server** to change journal settings.', ERROR_COLOR)));
     return interaction.reply(ephemeral(settingsPanel('general', getSettings(interaction.guildId))));
   }
 }

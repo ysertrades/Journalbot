@@ -5,7 +5,7 @@ const { getSettings, createDraft, purgeDrafts } = require('../lib/db');
 const { journalPanel } = require('../lib/panels');
 const { isAllowed } = require('../lib/permissions');
 const { validateImage, imageRecord } = require('../lib/poster');
-const { card, ephemeral } = require('../lib/ui');
+const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 
 class JournalCommand extends Command {
   constructor(ctx, opts) { super(ctx, { ...opts, name: 'journal', description: 'Log a trade to your journal forum' }); }
@@ -17,7 +17,7 @@ class JournalCommand extends Command {
   }
   async chatInputRun(interaction) {
     if (!interaction.guild) return interaction.reply(ephemeral(card('Use this inside a server.')));
-    if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
     purgeDrafts();
     const settings = getSettings(interaction.guildId);
     const pic = interaction.options.getAttachment('picture');

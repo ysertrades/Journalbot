@@ -7,7 +7,7 @@ const { OUTCOMES } = require('../lib/format');
 const { canConfigure, healthCheck } = require('../lib/permissions');
 const { scanGuild, summaryText } = require('../lib/scanner');
 const { weeklyImage, monthlyImage, postNow, reportMessage } = require('../lib/reports');
-const { card, ephemeral } = require('../lib/ui');
+const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 const { DateTime } = require('luxon');
 
 const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
@@ -29,7 +29,7 @@ async function render(i, page, settings) {
 }
 /** Called for every `js:` component interaction and `jsm:` modal. */
 async function handleSettings(i) {
-  if (!canConfigure(i)) return i.reply(ephemeral(card('You need **Manage Server** to change journal settings.', 0xf87171)));
+  if (!canConfigure(i)) return i.reply(ephemeral(card('You need **Manage Server** to change journal settings.', ERROR_COLOR)));
   const [ns, group, action] = i.customId.split(':'); // js:{group}:{action} | jsm:{page}:{field}
   const gid = i.guildId; let s = getSettings(gid);
   const answer = async (page) => { s = getSettings(gid); return i.editReply({ components: [await render(i, page, s)] }); };
@@ -40,7 +40,7 @@ async function handleSettings(i) {
     if (group === 'schedule' && action === 'mtime') { const t = normTime(v); if (t) saveSettings(gid, { month_time: t }); else err = 'Use 24h time like `17:00`.'; }
     if (group === 'schedule' && action === 'tz') { if (validTz(v)) saveSettings(gid, { timezone: v }); else err = 'Unknown timezone. Use an IANA name like `America/New_York`.'; }
     if (group === 'advanced' && action === 'cur') saveSettings(gid, { currency: v.slice(0, 3) || '$' });
-    if (err) return i.reply(ephemeral(card(`⚠️ ${err}`, 0xfbbf24)));
+    if (err) return i.reply(ephemeral(card(`⚠️ ${err}`, WARN_COLOR)));
     await i.deferUpdate(); return answer(group);
   }
 
@@ -110,7 +110,7 @@ async function handleSettings(i) {
       const img = action === 'prev_week' ? weeklyImage(gid, now.toISODate(), s) : monthlyImage(gid, now.year, now.month, s);
       const msg = reportMessage(img, { ...s, ping_role_id: null });
       return i.followUp({ components: msg.components, files: msg.files, flags: 64 | 32768 });
-    } catch (e) { return i.followUp(ephemeral(card(`⚠️ ${e.message}`, 0xf87171))); }
+    } catch (e) { return i.followUp(ephemeral(card(`⚠️ ${e.message}`, ERROR_COLOR))); }
   }
   return answer(page);
 }

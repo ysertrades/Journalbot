@@ -10,7 +10,7 @@ const { scanGuild, summaryText } = require('../lib/scanner');
 const { weeklyImage, monthlyImage, reportMessage } = require('../lib/reports');
 const { allForums, ledgerThreads } = require('../lib/routing');
 const { parseDateInput, formatCents } = require('../lib/money');
-const { card, ephemeral } = require('../lib/ui');
+const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 
 const EDIT_NAME = 'Edit journal PnL';
 
@@ -31,7 +31,7 @@ class PnlCommand extends Command {
 
   async chatInputRun(interaction) {
     if (!interaction.guild) return interaction.reply(ephemeral(card('Use this inside a server.')));
-    if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
     const settings = getSettings(interaction.guildId), sub = interaction.options.getSubcommand();
     // Reply at once with a Components V2 message (a deferred reply cannot become V2), then edit it when the work is done.
     // Never pass `flags` to editReply: the message already carries them.
@@ -39,7 +39,7 @@ class PnlCommand extends Command {
     const show = (payload) => interaction.editReply(payload);
     try {
       if (sub === 'rescan') {
-        if (!allForums(settings).length) return await show({ components: [card('No journal forums set yet. Use `/journal-settings` \u2192 Outcome forums.', 0xfbbf24)] });
+        if (!allForums(settings).length) return await show({ components: [card('No journal forums set yet. Use `/journal-settings` \u2192 Outcome forums.', WARN_COLOR)] });
         return await show({ components: [card(summaryText(await scanGuild(interaction.guild, settings, { force: true })))] });
       }
       await scanGuild(interaction.guild, settings);
@@ -47,28 +47,28 @@ class PnlCommand extends Command {
       if (sub === 'week') {
         const d = interaction.options.getString('date');
         const iso = d ? parseDateInput(d, settings.timezone) : DateTime.now().setZone(settings.timezone).toISODate();
-        if (!iso) return await show({ components: [card('Could not read that date. Try `2026-10-14`.', 0xfbbf24)] });
+        if (!iso) return await show({ components: [card('Could not read that date. Try `2026-10-14`.', WARN_COLOR)] });
         img = weeklyImage(interaction.guildId, iso, settings);
       } else {
         const m = interaction.options.getString('month');
         const now = DateTime.now().setZone(settings.timezone);
         const mm = m ? DateTime.fromFormat(m.trim(), 'yyyy-MM', { zone: settings.timezone }) : now;
-        if (!mm.isValid) return await show({ components: [card('Could not read that month. Use `YYYY-MM`.', 0xfbbf24)] });
+        if (!mm.isValid) return await show({ components: [card('Could not read that month. Use `YYYY-MM`.', WARN_COLOR)] });
         img = monthlyImage(interaction.guildId, mm.year, mm.month, settings);
       }
       const msg = reportMessage(img, { ...settings, ping_role_id: null });
       return await show({ components: msg.components, files: msg.files });
     } catch (e) {
       this.container.logger.error(`[pnl ${sub}] failed`, e);
-      return interaction.editReply({ components: [card(`\u26A0\uFE0F ${e.message}`, 0xf87171)] }).catch(() => {});
+      return interaction.editReply({ components: [card(`\u26A0\uFE0F ${e.message}`, ERROR_COLOR)] }).catch(() => {});
     }
   }
 
   async contextMenuRun(interaction) {
-    if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
     const msg = interaction.targetMessage, ch = msg.channel;
     if (!ch?.isThread?.() || !ch.parent || ![15, 16].includes(ch.parent.type)) {
-      return interaction.reply(ephemeral(card('Use this on a post inside a journal forum.', 0xfbbf24)));
+      return interaction.reply(ephemeral(card('Use this on a post inside a journal forum.', WARN_COLOR)));
     }
     // a trade inside a destination post is keyed by its message; a one-trade post by the post itself
     const key = ledgerThreads(getSettings(interaction.guildId))[ch.id] ? msg.id : ch.id;

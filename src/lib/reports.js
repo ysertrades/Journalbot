@@ -8,6 +8,7 @@ const { weekData, monthData } = require('./pnl');
 const { renderWeekly, renderMonthly } = require('./renderer');
 const { scanGuild } = require('./scanner');
 const { formatDollars } = require('./money');
+const { totalColor } = require('./format');
 
 const GRACE_HOURS = 6;
 
@@ -24,7 +25,7 @@ function monthlyImage(guildId, year, month, settings) {
 }
 
 function reportMessage(img, settings, { late } = {}) {
-  const c = new ContainerBuilder().setAccentColor(img.data.total > 0 ? 0x34d399 : img.data.total < 0 ? 0xf87171 : 0xfbbf24);
+  const c = new ContainerBuilder().setAccentColor(totalColor(img.data.total));
   if (settings.ping_role_id) c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`<@&${settings.ping_role_id}>`));
   c.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${img.name}`)));
   c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`${img.summary}${late ? '\n-# posted late (bot was offline at the scheduled time)' : ''}`));

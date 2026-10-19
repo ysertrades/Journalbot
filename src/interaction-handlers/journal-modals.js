@@ -5,7 +5,7 @@ const { journalPanel } = require('../lib/panels');
 const { isAllowed, canConfigure } = require('../lib/permissions');
 const { validateImage, imageRecord } = require('../lib/poster');
 const { parseMoney, parseR, applyOutcomeSign, parseDateInput, formatCents } = require('../lib/money');
-const { card, ephemeral } = require('../lib/ui');
+const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 
 const val = (f, id) => { try { return (f.getTextInputValue(id) || '').trim(); } catch { return ''; } };
 const sel = (f, id) => { try { return f.getStringSelectValues(id)[0] || null; } catch { return null; } };
@@ -23,10 +23,10 @@ class JournalModals extends InteractionHandler {
   async run(i, p) {
     if (p.type === 'settings') return require('./settings-components').handleSettings(i);
     if (p.type === 'edit') return this.editPnl(i, p.id, p.container);
-    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
     const draft = getDraft(p.id);
-    if (!draft) return i.reply(ephemeral(card('This journal panel expired. Run `/journal` again.', 0xfbbf24)));
-    if (draft.userId !== i.user.id) return i.reply(ephemeral(card('This panel belongs to someone else.', 0xf87171)));
+    if (!draft) return i.reply(ephemeral(card('This journal panel expired. Run `/journal` again.', WARN_COLOR)));
+    if (draft.userId !== i.user.id) return i.reply(ephemeral(card('This panel belongs to someone else.', ERROR_COLOR)));
     const settings = getSettings(i.guildId), f = i.fields, d = draft.fields;
     let notice;
 
@@ -71,15 +71,15 @@ class JournalModals extends InteractionHandler {
   }
 
   async editPnl(i, key, containerId) {
-    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', 0xf87171)));
+    if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
     const settings = getSettings(i.guildId), c = parseMoney(i.fields.getTextInputValue('pnl'));
-    if (c === null) return i.reply(ephemeral(card('That is not a valid amount.', 0xfbbf24)));
+    if (c === null) return i.reply(ephemeral(card('That is not a valid amount.', WARN_COLOR)));
     const cur = getPnlEntry(key);
     const ch = await i.guild.channels.fetch(containerId).catch(() => null);
     let created = ch?.createdTimestamp;
     if (!cur && ch && key !== containerId) created = (await ch.messages.fetch(key).catch(() => null))?.createdTimestamp;   // a trade inside a destination post
     const date = cur?.date_local || (created ? require('luxon').DateTime.fromMillis(created, { zone: settings.timezone }).toISODate() : null);
-    if (!ch || !date) return i.reply(ephemeral(card('Could not find that post.', 0xf87171)));
+    if (!ch || !date) return i.reply(ephemeral(card('Could not find that post.', ERROR_COLOR)));
     const outcome = cur?.outcome === 'missed' ? 'missed' : c > 0 ? 'win' : c < 0 ? 'loss' : 'be';
     upsertPnl({ thread_id: key, container_id: containerId, guild_id: i.guildId, forum_id: ch.parentId, outcome, pnl_cents: c, potential_cents: cur?.potential_cents ?? null, date_local: date, source: 'manual' });
     return i.reply(ephemeral(card(`Saved ${formatCents(c, { symbol: settings.currency })} for <#${containerId}>.\n-# Used in weekly and monthly images. The message text itself is unchanged.`)));

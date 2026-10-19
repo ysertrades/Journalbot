@@ -2,13 +2,34 @@
 const { ButtonStyle } = require('discord.js');
 const { formatCents, formatR, formatDateDisplay } = require('./money');
 
-const OUTCOMES = {
-  win:    { key: 'win',    label: 'Win',       upper: 'WIN',       color: 0x34d399, emojiName: 'ywin',    fallback: '\u{1F7E2}', style: ButtonStyle.Success,   tag: 'Win' },
-  loss:   { key: 'loss',   label: 'Loss',      upper: 'LOSS',      color: 0xf87171, emojiName: 'yloss',   fallback: '\u{1F534}', style: ButtonStyle.Danger,    tag: 'Loss' },
-  be:     { key: 'be',     label: 'Breakeven', upper: 'BREAKEVEN', color: 0xfbbf24, emojiName: 'ybe',     fallback: '\u{1F7E1}', style: ButtonStyle.Secondary, tag: 'Breakeven' },
-  missed: { key: 'missed', label: 'Missed',    upper: 'MISSED',    color: 0x94a3b8, emojiName: 'ymissed', fallback: '\u{1F535}', style: ButtonStyle.Secondary, tag: 'Missed' },
+/**
+ * The palette behind every container's accent stripe: the YSER look.
+ * Deeper, quieter tones than neon, so the stripe reads as a finish rather
+ * than a highlighter; ink for the trade log itself.
+ */
+const PALETTE = {
+  ink:    0x111214, // posted trades and their preview: dark, the post carries its own outcome
+  brand:  0x5865f2, // panels, settings, info
+  win:    0x22a565, // deep emerald
+  loss:   0xd94b4b, // muted crimson
+  be:     0xd9a03a, // warm amber
+  missed: 0x5f6672, // slate
+  warn:   0xd9a03a,
+  error:  0xd94b4b,
 };
-const NEUTRAL_COLOR = 0x5aa2ff;
+
+const OUTCOMES = {
+  win:    { key: 'win',    label: 'Win',       upper: 'WIN',       color: PALETTE.win,    emojiName: 'ywin',    fallback: '\u{1F7E2}', style: ButtonStyle.Success,   tag: 'Win' },
+  loss:   { key: 'loss',   label: 'Loss',      upper: 'LOSS',      color: PALETTE.loss,   emojiName: 'yloss',   fallback: '\u{1F534}', style: ButtonStyle.Danger,    tag: 'Loss' },
+  be:     { key: 'be',     label: 'Breakeven', upper: 'BREAKEVEN', color: PALETTE.be,     emojiName: 'ybe',     fallback: '\u{1F7E1}', style: ButtonStyle.Secondary, tag: 'Breakeven' },
+  missed: { key: 'missed', label: 'Missed',    upper: 'MISSED',    color: PALETTE.missed, emojiName: 'ymissed', fallback: '\u{1F535}', style: ButtonStyle.Secondary, tag: 'Missed' },
+};
+const NEUTRAL_COLOR = PALETTE.brand;
+const TRADE_COLOR = PALETTE.ink;
+const WARN_COLOR = PALETTE.warn;
+const ERROR_COLOR = PALETTE.error;
+/** accent for a PnL total: green up, red down, amber flat */
+const totalColor = (total) => (total > 0 ? PALETTE.win : total < 0 ? PALETTE.loss : PALETTE.be);
 
 /** { id, name, animated } for a custom emoji in the guild, or null */
 function findEmoji(guild, outcome) {
@@ -109,4 +130,4 @@ function threadTitle(outcome, f, symbol = '$') {
   return clip(parts.join(' \u00b7 '), 100);
 }
 
-module.exports = { OUTCOMES, NEUTRAL_COLOR, findEmoji, emojiToken, buildPostBody, threadTitle, clip };
+module.exports = { OUTCOMES, PALETTE, NEUTRAL_COLOR, TRADE_COLOR, WARN_COLOR, ERROR_COLOR, totalColor, findEmoji, emojiToken, buildPostBody, threadTitle, clip };

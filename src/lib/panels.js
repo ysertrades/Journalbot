@@ -4,7 +4,7 @@ const {
   RoleSelectMenuBuilder, SectionBuilder, SeparatorBuilder, SeparatorSpacingSize, StringSelectMenuBuilder, TextDisplayBuilder,
   TextInputBuilder, TextInputStyle, UserSelectMenuBuilder, FileUploadBuilder,
 } = require('discord.js');
-const { OUTCOMES, NEUTRAL_COLOR, findEmoji, emojiToken, buildPostBody } = require('./format');
+const { OUTCOMES, NEUTRAL_COLOR, TRADE_COLOR, findEmoji, emojiToken, buildPostBody } = require('./format');
 const { formatCents, formatR, formatDateDisplay } = require('./money');
 const { routeTarget } = require('./routing');
 
@@ -86,7 +86,7 @@ function journalPanel(draft, guild, settings, { notice } = {}) {
 
 function previewPanel(draft, guild, settings) {
   const body = buildPostBody(draft.outcome, draft.fields, { emoji: emojiToken(guild, draft.outcome), symbol: settings.currency, showR: settings.show_r });
-  const c = new ContainerBuilder().setAccentColor(OUTCOMES[draft.outcome].color);
+  const c = new ContainerBuilder().setAccentColor(TRADE_COLOR); // looks exactly like the posted trade
   if (draft.image) c.addTextDisplayComponents(td(`-# \u{1F5BC}️ Picture **${draft.image.name}** will appear above this text`));
   c.addTextDisplayComponents(td(body));
   return c;
