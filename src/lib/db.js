@@ -237,6 +237,24 @@ function journaledOn(guildId, dates) {
   for (const d of new Set(dates)) out[d] = q.all(guildId, d, guildId).map((r) => ({ instrument: r.instrument || null, pnl_cents: r.pnl_cents }));
   return out;
 }
+/**
+ * Trades the bot posted that are still in the journal (their PnL row is
+ * alive), newest first, for /edit-trade. Only the latest journal row per
+ * message counts, and hand-typed posts have none, so they never show up.
+ */
+function editableTrades(guildId, startISO = '0000-01-01', endISO = '9999-12-31') {
+  return db.prepare(`SELECT e.*, p.date_local AS live_date FROM journal_entries e JOIN pnl_entries p ON p.thread_id = e.message_id
+    WHERE e.guild_id = ? AND p.date_local >= ? AND p.date_local <= ?
+      AND e.id = (SELECT MAX(x.id) FROM journal_entries x WHERE x.message_id = e.message_id)
+    ORDER BY p.date_local DESC, e.created_at DESC LIMIT 5000`).all(guildId, startISO, endISO);
+}
+function getEntry(id) { return db.prepare('SELECT * FROM journal_entries WHERE id = ?').get(id) || null; }
+/** rewrites one journal row after /edit-trade saved it to the post */
+function updateEntry(id, e) {
+  db.prepare(`UPDATE journal_entries SET instrument=@instrument, direction=@direction, session=@session, setup=@setup, entry=@entry, stop=@stop,
+    target=@target, exit=@exit, r_multiple=@r_multiple, pnl_cents=@pnl_cents, potential_cents=@potential_cents, followed_plan=@followed_plan,
+    fields_json=@fields_json, date_local=@date_local, image_name=@image_name WHERE id=@id`).run({ ...e, id });
+}
 function pnlRowsForForum(guildId, forumId) {
   return db.prepare('SELECT thread_id, container_id FROM pnl_entries WHERE guild_id=? AND forum_id=?').all(guildId, forumId);
 }
@@ -266,4 +284,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, lastImportRun, recordImportRun, journaledOn, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };

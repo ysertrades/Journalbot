@@ -3,6 +3,7 @@ const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/frame
 const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl, importedHashes, journaledOn, lastImportRun } = require('../lib/db');
 const { journalPanel, csvPreviewPanel } = require('../lib/panels');
 const { readTrades, sparkline } = require('../lib/csv-import');
+const { finderState, finderPanel, editorPanel } = require('../lib/trade-editor');
 
 const CSV_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -40,6 +41,7 @@ class JournalModals extends InteractionHandler {
   parse(i) {
     if (i.customId.startsWith('jrm:')) { const [, id, kind] = i.customId.split(':'); return this.some({ type: 'draft', id, kind }); }
     if (i.customId.startsWith('jsm:')) return this.some({ type: 'settings' });
+    if (i.customId.startsWith('tem:')) { const [, id] = i.customId.split(':'); return this.some({ type: 'draft', id, kind: 'find' }); }
     if (i.customId.startsWith('jre:')) { const [, key, container] = i.customId.split(':'); return this.some({ type: 'edit', id: key, container: container || key }); }
     return this.none();
   }
@@ -49,12 +51,18 @@ class JournalModals extends InteractionHandler {
     if (p.type === 'edit') return this.editPnl(i, p.id, p.container);
     if (!isAllowed(i)) return i.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
     const draft = getDraft(p.id);
-    if (!draft) return i.reply(ephemeral(card('This journal panel expired. Run `/journal` again.', WARN_COLOR)));
+    if (!draft) return i.reply(ephemeral(card(`This panel expired. Run \`${p.kind === 'find' ? '/edit-trade' : '/journal'}\` again.`, WARN_COLOR)));
     if (draft.userId !== i.user.id) return i.reply(ephemeral(card('This panel belongs to someone else.', ERROR_COLOR)));
     const settings = getSettings(i.guildId), f = i.fields, d = draft.fields;
     let notice;
 
     if (p.kind === 'csv') return this.csvUpload(i, draft, settings);
+    if (p.kind === 'find') {                                   // /edit-trade search
+      const st = finderState(draft); st.q = val(f, 'q').replace(/[`\n]/g, '').slice(0, 60); st.page = 0;
+      saveDraft(draft);
+      const payload = { components: [finderPanel(draft, i.guild, settings)] };
+      return i.isFromMessage() ? i.update(payload) : i.reply({ ...payload, ...ephemeral(payload.components[0]) });
+    }
     if (p.kind === 'trade') {
       const date = parseDateInput(val(f, 'date'), settings.timezone);
       if (!date) notice = '⚠️ Could not read that date. Try `today`, `yesterday` or `2026-10-16`. Other changes were saved.';
@@ -91,7 +99,8 @@ class JournalModals extends InteractionHandler {
       if (att) { const bad = validateImage(att); if (bad) notice = `⚠️ ${bad}`; else draft.image = imageRecord(att); }
     }
     saveDraft(draft);
-    const payload = { components: [journalPanel(draft, i.guild, settings, { notice })] };
+    // the same forms serve /edit-trade: an open trade goes back to its editor, not the journal panel
+    const payload = { components: [d._edit ? editorPanel(draft, i.guild, settings, { notice }) : journalPanel(draft, i.guild, settings, { notice })] };
     return i.isFromMessage() ? i.update(payload) : i.reply({ ...payload, ...ephemeral(payload.components[0]) });
   }
 
