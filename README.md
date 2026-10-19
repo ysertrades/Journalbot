@@ -7,6 +7,7 @@ Discord journaling bot built on discord.js 14 and Sapphire. Everything is Compon
 - The bot scans every journal forum, parses each post's `PNL:` line and totals PnL by day, week and month.
 - Weekly image (calendar, five weekdays, weekend folded into the total) is posted to a report channel at the day and time you choose.
 - Month-end image (every day of the month) is posted on the last day of the month.
+- **Import from CSV** sits at the bottom of the `/journal` panel: upload a trade-history export (Hyperprop, Tradovate, TopstepX, NinjaTrader or any sheet with a symbol and PnL column). A preview shows the net PnL, a running-PnL sparkline, how many wins / losses / breakevens and where each group will post; **Import** then posts every trade into its outcome's destination with a live progress bar. Fees are taken off, rows it can't read are listed, and trades already imported are skipped, so the same file can be uploaded again safely (up to 400 trades per run).
 - `/journal-settings` opens a Components V2 settings panel (General / Outcome forums / Schedule / Advanced).
 - `/pnl day [date]` (a 4:5 daily card: the day's PnL, every trade on "the tape" with a running-PnL step chart, and the week around it), `/pnl week [date]`, `/pnl month [YYYY-MM]`, `/pnl rescan`.
 - Message context menu **Edit journal PnL**: override the PnL of any journal post (used for the images, post text unchanged).

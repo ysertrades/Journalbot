@@ -92,6 +92,8 @@ if (!hasCol('journal_settings', 'outcome_threads_json')) db.exec("ALTER TABLE jo
 if (!hasCol('pnl_entries', 'container_id')) db.exec('ALTER TABLE pnl_entries ADD COLUMN container_id TEXT');
 db.exec('UPDATE pnl_entries SET container_id = thread_id WHERE container_id IS NULL');
 db.exec('CREATE INDEX IF NOT EXISTS idx_pnl_container ON pnl_entries (container_id)');
+// CSV imports: one row per trade already imported, so a file can be dropped twice safely
+db.exec('CREATE TABLE IF NOT EXISTS journal_imports (guild_id TEXT NOT NULL, hash TEXT NOT NULL, message_id TEXT, imported_at INTEGER NOT NULL, PRIMARY KEY (guild_id, hash))');
 
 const DEFAULTS = {
   forums: [], default_forum_id: null, report_channel_id: null,
@@ -206,6 +208,14 @@ function entryDetailsFor(keys) {
   for (const k of keys) { const r = byMsg.get(k) || byThread.get(k); if (r) out[k] = r; }
   return out;
 }
+/** which of these trade hashes this server already imported */
+function importedHashes(guildId, hashes) {
+  const q = db.prepare('SELECT 1 FROM journal_imports WHERE guild_id = ? AND hash = ?');
+  return new Set(hashes.filter((h) => q.get(guildId, h)));
+}
+function markImported(guildId, hash, messageId) {
+  db.prepare('INSERT OR REPLACE INTO journal_imports (guild_id, hash, message_id, imported_at) VALUES (?,?,?,?)').run(guildId, hash, messageId || null, Date.now());
+}
 function pnlRowsForForum(guildId, forumId) {
   return db.prepare('SELECT thread_id, container_id FROM pnl_entries WHERE guild_id=? AND forum_id=?').all(guildId, forumId);
 }
@@ -235,4 +245,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };

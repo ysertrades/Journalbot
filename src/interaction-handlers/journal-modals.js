@@ -1,7 +1,10 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
-const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl } = require('../lib/db');
-const { journalPanel } = require('../lib/panels');
+const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl, importedHashes } = require('../lib/db');
+const { journalPanel, csvPreviewPanel } = require('../lib/panels');
+const { readTrades, sparkline } = require('../lib/csv-import');
+
+const CSV_MAX_BYTES = 2 * 1024 * 1024;
 const { isAllowed, canConfigure } = require('../lib/permissions');
 const { validateImage, imageRecord } = require('../lib/poster');
 const { parseMoney, parseR, applyOutcomeSign, parseDateInput, formatCents } = require('../lib/money');
@@ -30,6 +33,7 @@ class JournalModals extends InteractionHandler {
     const settings = getSettings(i.guildId), f = i.fields, d = draft.fields;
     let notice;
 
+    if (p.kind === 'csv') return this.csvUpload(i, draft, settings);
     if (p.kind === 'trade') {
       const date = parseDateInput(val(f, 'date'), settings.timezone);
       if (!date) notice = '⚠️ Could not read that date. Try `today`, `yesterday` or `2026-10-16`. Other changes were saved.';
@@ -67,6 +71,36 @@ class JournalModals extends InteractionHandler {
     }
     saveDraft(draft);
     const payload = { components: [journalPanel(draft, i.guild, settings, { notice })] };
+    return i.isFromMessage() ? i.update(payload) : i.reply({ ...payload, ...ephemeral(payload.components[0]) });
+  }
+
+  /** a CSV dropped into the journal panel: read it, drop what's already imported, show the preview */
+  async csvUpload(i, draft, settings) {
+    const back = (notice) => {
+      const payload = { components: [journalPanel(draft, i.guild, settings, { notice })] };
+      return i.isFromMessage() ? i.update(payload) : i.reply({ ...payload, ...ephemeral(payload.components[0]) });
+    };
+    let files; try { files = i.fields.getUploadedFiles('file'); } catch { files = null; }
+    const att = files && files.first ? files.first() : null;
+    if (!att) return back('⚠️ No file came through. Try the upload again.');
+    const name = String(att.name || 'file');
+    if (!/\.(csv|txt|tsv)$/i.test(name) && !/csv|text\/plain|tab-separated/i.test(att.contentType || '')) return back(`⚠️ **${name}** isn't a CSV. Export your trade history as .csv and upload that.`);
+    if (att.size > CSV_MAX_BYTES) return back('⚠️ That file is over 2 MB. Export a shorter date range.');
+    let text;
+    try {
+      const res = await fetch(att.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      text = await res.text();
+    } catch (e) { return back(`⚠️ Could not download the file (${e.message}). Try again.`); }
+    const r = readTrades(text, settings.timezone);
+    if (r.error) return back(`⚠️ ${r.error}`);
+    const seen = importedHashes(i.guildId, r.trades.map((t) => t.hash));
+    const fresh = r.trades.filter((t) => !seen.has(t.hash));
+    let tag = ''; try { tag = (i.fields.getTextInputValue('tag') || '').replace(/[`\n]/g, '').trim().slice(0, 60); } catch { /* optional */ }
+    draft.fields._import = { file: name.slice(0, 60), format: r.format, trades: fresh, dupes: r.trades.length - fresh.length, skipped: r.skipped.slice(0, 200), truncated: !!r.truncated };
+    draft.fields._import_tag = tag || undefined;
+    saveDraft(draft);
+    const payload = { components: [csvPreviewPanel(draft, i.guild, settings, draft.fields._import, { sparkline })] };
     return i.isFromMessage() ? i.update(payload) : i.reply({ ...payload, ...ephemeral(payload.components[0]) });
   }
 
