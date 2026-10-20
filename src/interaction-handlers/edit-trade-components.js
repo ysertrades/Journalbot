@@ -1,6 +1,6 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
-const { getSettings, getDraft, saveDraft, getEntry } = require('../lib/db');
+const { getSettings, getDraft, saveDraft, getEntry, setTradeAccount, getAccount } = require('../lib/db');
 const { isAllowed } = require('../lib/permissions');
 const { tradeModal, resultModal, notesModal, pictureModal } = require('../lib/panels');
 const ed = require('../lib/trade-editor');
@@ -53,6 +53,12 @@ class EditTradeComponents extends InteractionHandler {
     // everything below works on an open trade
     if (!editing) return list('Pick a trade first.');
     if (action === 'edit' && MODALS[arg]) return this.modal(i, MODALS[arg](draft));
+    if (action === 'acct') {
+      const v = Number(i.values?.[0]);
+      if (v) setTradeAccount(draft.fields._edit.key, v);
+      const a = v ? getAccount(v) : null;
+      return editor({ notice: a ? `\u{1F3E6} Moved to **${a.name}${a.phase === 'eval' && a.attempt > 1 ? ` #${a.attempt}` : ''}**. Its dashboard counts this trade now.` : undefined });
+    }
     if (action === 'rmpic') { draft.image = null; draft.fields._edit.removePic = true; return editor({ notice: '-# The chart comes off when you save.' }); }
     if (action === 'undo') { ed.discardChanges(draft); return editor({ notice: '-# Changes discarded. The post was not touched.' }); }
     if (action === 'back') { ed.unloadTrade(draft); return list(); }

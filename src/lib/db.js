@@ -96,6 +96,25 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_pnl_container ON pnl_entries (container_
 // CSV imports: one row per trade already imported, so a file can be dropped twice safely
 db.exec('CREATE TABLE IF NOT EXISTS journal_imports (guild_id TEXT NOT NULL, hash TEXT NOT NULL, message_id TEXT, imported_at INTEGER NOT NULL, PRIMARY KEY (guild_id, hash))');
 db.exec('CREATE TABLE IF NOT EXISTS journal_import_runs (guild_id TEXT NOT NULL, at INTEGER NOT NULL, count INTEGER NOT NULL, last_trade_at INTEGER, file TEXT)');
+/*
+ * Trading accounts. Each row is one run of one account: an evaluation attempt, or the funded phase
+ * that followed it. Rows of the same journey share chain_id, so "Eval #1 breached, Eval #2 passed,
+ * Funded" reads as one story. Money is in cents; rules left NULL are off.
+ */
+db.exec(`CREATE TABLE IF NOT EXISTS journal_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, chain_id INTEGER, name TEXT NOT NULL, firm TEXT,
+  phase TEXT NOT NULL DEFAULT 'eval', status TEXT NOT NULL DEFAULT 'active', attempt INTEGER NOT NULL DEFAULT 1,
+  size_cents INTEGER NOT NULL DEFAULT 0, start_balance_cents INTEGER NOT NULL DEFAULT 0, balance_adj_cents INTEGER NOT NULL DEFAULT 0,
+  target_cents INTEGER, daily_loss_cents INTEGER, max_dd_cents INTEGER, dd_type TEXT NOT NULL DEFAULT 'trailing',
+  min_days INTEGER, consistency_pct INTEGER, split_pct INTEGER,
+  started_on TEXT NOT NULL, ended_on TEXT, ended_reason TEXT, created_at INTEGER NOT NULL)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_guild ON journal_accounts (guild_id)');
+db.exec('CREATE TABLE IF NOT EXISTS journal_payouts (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, account_id INTEGER NOT NULL, amount_cents INTEGER NOT NULL, date TEXT NOT NULL, note TEXT, created_at INTEGER NOT NULL)');
+// one row per alert or milestone already announced, so a channel never hears the same warning twice
+db.exec('CREATE TABLE IF NOT EXISTS journal_account_events (account_id INTEGER NOT NULL, kind TEXT NOT NULL, period TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (account_id, kind, period))');
+if (!hasCol('pnl_entries', 'account_id')) db.exec('ALTER TABLE pnl_entries ADD COLUMN account_id INTEGER');
+if (!hasCol('journal_settings', 'default_account_id')) db.exec('ALTER TABLE journal_settings ADD COLUMN default_account_id INTEGER');
+if (!hasCol('journal_settings', 'alert_channel_id')) db.exec('ALTER TABLE journal_settings ADD COLUMN alert_channel_id TEXT');
 
 const DEFAULTS = {
   forums: [], default_forum_id: null, report_channel_id: null,
@@ -103,6 +122,7 @@ const DEFAULTS = {
   month_enabled: true, month_time: '17:00',
   timezone: 'America/New_York', currency: '$', show_r: true,
   ping_role_id: null, allowed_users: [], outcome_forums: {}, outcome_threads: {}, theme: 'light',
+  default_account_id: null, alert_channel_id: null,
 };
 const THEMES = ['light', 'dark', 'auto'];
 
@@ -119,6 +139,7 @@ function rowToSettings(guildId, r) {
     outcome_forums: JSON.parse(r.outcome_forums_json || '{}'),
     outcome_threads: JSON.parse(r.outcome_threads_json || '{}'),
     theme: THEMES.includes(r.theme) ? r.theme : 'light',
+    default_account_id: r.default_account_id ?? null, alert_channel_id: r.alert_channel_id ?? null,
   };
 }
 
@@ -131,14 +152,15 @@ function saveSettings(guildId, patch) {
   const n = { ...cur, ...patch };
   db.prepare(`INSERT INTO journal_settings
     (guild_id, forums_json, default_forum_id, report_channel_id, weekly_day, weekly_time, weekly_enabled,
-     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json, outcome_threads_json, theme)
+     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json, outcome_threads_json, theme, default_account_id, alert_channel_id)
     VALUES (@guild_id,@forums_json,@default_forum_id,@report_channel_id,@weekly_day,@weekly_time,@weekly_enabled,
-     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json,@outcome_threads_json,@theme)
+     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json,@outcome_threads_json,@theme,@default_account_id,@alert_channel_id)
     ON CONFLICT(guild_id) DO UPDATE SET forums_json=excluded.forums_json, default_forum_id=excluded.default_forum_id,
      report_channel_id=excluded.report_channel_id, weekly_day=excluded.weekly_day, weekly_time=excluded.weekly_time,
      weekly_enabled=excluded.weekly_enabled, month_enabled=excluded.month_enabled, month_time=excluded.month_time,
      timezone=excluded.timezone, currency=excluded.currency, show_r=excluded.show_r, ping_role_id=excluded.ping_role_id,
-     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json, outcome_threads_json=excluded.outcome_threads_json, theme=excluded.theme`).run({
+     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json, outcome_threads_json=excluded.outcome_threads_json, theme=excluded.theme,
+     default_account_id=excluded.default_account_id, alert_channel_id=excluded.alert_channel_id`).run({
     guild_id: guildId, forums_json: JSON.stringify(n.forums || []), default_forum_id: n.default_forum_id ?? null,
     report_channel_id: n.report_channel_id ?? null, weekly_day: n.weekly_day, weekly_time: n.weekly_time,
     weekly_enabled: n.weekly_enabled ? 1 : 0, month_enabled: n.month_enabled ? 1 : 0, month_time: n.month_time,
@@ -147,6 +169,7 @@ function saveSettings(guildId, patch) {
     outcome_forums_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_forums || {}).filter(([, v]) => v))),
     outcome_threads_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_threads || {}).filter(([, v]) => v && v.thread))),
     theme: THEMES.includes(n.theme) ? n.theme : 'light',
+    default_account_id: n.default_account_id ?? null, alert_channel_id: n.alert_channel_id ?? null,
   });
   return getSettings(guildId);
 }
@@ -197,8 +220,75 @@ function upsertPnl(e) {
 }
 function getPnlEntry(threadId) { return db.prepare('SELECT * FROM pnl_entries WHERE thread_id = ?').get(threadId); }
 function deletePnl(threadId) { return db.prepare('DELETE FROM pnl_entries WHERE thread_id = ?').run(threadId).changes; }
-function pnlBetween(guildId, startISO, endISO) {
-  return db.prepare('SELECT * FROM pnl_entries WHERE guild_id=? AND date_local>=? AND date_local<=? ORDER BY date_local').all(guildId, startISO, endISO);
+/**
+ * PnL rows in a date range. accountId (optional) keeps one account's trades: a trade belongs to the
+ * account it was tagged with, and untagged trades (typed by hand, or logged before accounts existed)
+ * belong to the server's default account.
+ */
+function pnlBetween(guildId, startISO, endISO, accountId = null) {
+  if (accountId === null || accountId === undefined || accountId === 'all') {
+    return db.prepare('SELECT * FROM pnl_entries WHERE guild_id=? AND date_local>=? AND date_local<=? ORDER BY date_local').all(guildId, startISO, endISO);
+  }
+  return db.prepare(`SELECT * FROM pnl_entries WHERE guild_id=? AND date_local>=? AND date_local<=?
+    AND COALESCE(account_id, (SELECT default_account_id FROM journal_settings WHERE guild_id=?)) = ? ORDER BY date_local`).all(guildId, startISO, endISO, guildId, Number(accountId));
+}
+/** tags one trade (by its PnL key) with an account; null puts it back on the default account */
+function setTradeAccount(key, accountId) { db.prepare('UPDATE pnl_entries SET account_id = ? WHERE thread_id = ?').run(accountId ?? null, key); }
+function tradeAccountOf(key) { return db.prepare('SELECT account_id FROM pnl_entries WHERE thread_id = ?').get(key)?.account_id ?? null; }
+
+/* ---------------- accounts ---------------- */
+const ACCOUNT_COLS = ['chain_id', 'name', 'firm', 'phase', 'status', 'attempt', 'size_cents', 'start_balance_cents', 'balance_adj_cents', 'target_cents',
+  'daily_loss_cents', 'max_dd_cents', 'dd_type', 'min_days', 'consistency_pct', 'split_pct', 'started_on', 'ended_on', 'ended_reason'];
+function createAccount(guildId, a) {
+  const row = { chain_id: null, firm: null, phase: 'eval', status: 'active', attempt: 1, size_cents: 0, start_balance_cents: a.size_cents || 0, balance_adj_cents: 0,
+    target_cents: null, daily_loss_cents: null, max_dd_cents: null, dd_type: 'trailing', min_days: null, consistency_pct: null, split_pct: null,
+    ended_on: null, ended_reason: null, ...a };
+  const info = db.prepare(`INSERT INTO journal_accounts (guild_id, ${ACCOUNT_COLS.join(', ')}, created_at)
+    VALUES (@guild_id, ${ACCOUNT_COLS.map((c) => `@${c}`).join(', ')}, @created_at)`).run({ ...row, guild_id: guildId, created_at: Date.now() });
+  const id = Number(info.lastInsertRowid);
+  if (!row.chain_id) db.prepare('UPDATE journal_accounts SET chain_id = ? WHERE id = ?').run(id, id);
+  return getAccount(id);
+}
+function getAccount(id) { return db.prepare('SELECT * FROM journal_accounts WHERE id = ?').get(Number(id)) || null; }
+function updateAccount(id, patch) {
+  const keys = Object.keys(patch).filter((k) => ACCOUNT_COLS.includes(k));
+  if (keys.length) db.prepare(`UPDATE journal_accounts SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...patch, id: Number(id) });
+  return getAccount(id);
+}
+/** the server's accounts: active ones first, then the finished runs, newest first */
+function listAccounts(guildId, { includeEnded = true } = {}) {
+  return db.prepare(`SELECT * FROM journal_accounts WHERE guild_id = ? ${includeEnded ? '' : "AND status = 'active'"}
+    ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'passed' THEN 1 WHEN 'breached' THEN 2 ELSE 3 END, created_at DESC`).all(guildId);
+}
+function chainOf(account) { return db.prepare('SELECT * FROM journal_accounts WHERE chain_id = ? ORDER BY created_at, id').all(account.chain_id || account.id); }
+/** every PnL row that counts for one account run, from the day it started (to the day it ended) */
+function accountRows(account, settingsDefaultId) {
+  const isDefault = Number(settingsDefaultId) === Number(account.id);
+  return db.prepare(`SELECT * FROM pnl_entries WHERE guild_id = ? AND date_local >= ? AND date_local <= ?
+    AND (account_id = ? ${isDefault ? 'OR account_id IS NULL' : ''}) ORDER BY date_local`).all(account.guild_id, account.started_on, account.ended_on || '9999-12-31', account.id);
+}
+function addPayout(account, amountCents, date, note) {
+  db.prepare('INSERT INTO journal_payouts (guild_id, account_id, amount_cents, date, note, created_at) VALUES (?,?,?,?,?,?)').run(account.guild_id, account.id, amountCents, date, note || null, Date.now());
+}
+function payoutsOf(accountId) { return db.prepare('SELECT * FROM journal_payouts WHERE account_id = ? ORDER BY date, id').all(Number(accountId)); }
+/**
+ * Makes another account the default. Untagged trades belong to whichever account is the default, so
+ * the old default's untagged trades are pinned to it first: switching never moves history between accounts.
+ */
+function setDefaultAccount(guildId, accountId) {
+  const old = getSettings(guildId).default_account_id;
+  if (old && Number(old) !== Number(accountId)) {
+    const a = getAccount(old);
+    if (a) db.prepare('UPDATE pnl_entries SET account_id = ? WHERE guild_id = ? AND account_id IS NULL AND date_local >= ? AND date_local <= ?')
+      .run(a.id, guildId, a.started_on, a.ended_on || '9999-12-31');
+  }
+  return saveSettings(guildId, { default_account_id: accountId ?? null });
+}
+/** the periods recorded for one kind of account event, e.g. the breaches marked "not a breach" */
+function accountEventPeriods(accountId, kind) { return db.prepare('SELECT period FROM journal_account_events WHERE account_id = ? AND kind = ?').all(Number(accountId), kind).map((r) => r.period); }
+/** true the first time an alert / milestone is claimed for this account and period */
+function claimAccountEvent(accountId, kind, period) {
+  return db.prepare('INSERT OR IGNORE INTO journal_account_events (account_id, kind, period, at) VALUES (?,?,?,?)').run(Number(accountId), kind, period, Date.now()).changes > 0;
 }
 /**
  * The journal details (instrument, direction, R, when it was logged) behind
@@ -311,4 +401,5 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, setTradeAccount, tradeAccountOf,
+  createAccount, getAccount, updateAccount, listAccounts, chainOf, accountRows, addPayout, payoutsOf, claimAccountEvent, accountEventPeriods, setDefaultAccount, entryDetailsFor, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };

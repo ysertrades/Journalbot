@@ -4,7 +4,7 @@ const {
 } = require('discord.js');
 const { OUTCOMES, TRADE_COLOR, buildPostBody, threadTitle, emojiToken } = require('./format');
 const { tagToOutcome } = require('./parse');
-const { insertEntry, upsertPnl } = require('./db');
+const { insertEntry, upsertPnl, setTradeAccount } = require('./db');
 const { chunkText } = require('./text');
 
 const IMAGE_TYPES = /^image\/(png|jpe?g|webp|gif)$/i;
@@ -39,6 +39,7 @@ const FORUM_TYPES = [ChannelType.GuildForum, ChannelType.GuildMedia];
 async function postJournal({ guild, draft, settings }) {
   const outcome = draft.outcome, f = { ...draft.fields };
   const threadId = f._thread; delete f._forum_manual; delete f._thread;
+  const accountId = f._account ?? null; delete f._account;   // the account the trade counts toward (null: the server's default)
   if (outcome === 'missed') f.pnl_cents = 0;
   const body = buildPostBody(outcome, f, { emoji: emojiToken(guild, outcome), symbol: settings.currency, showR: settings.show_r }).slice(0, 3900);
   const file = draft.image ? await downloadImage(draft.image) : null;
@@ -99,6 +100,7 @@ async function postJournal({ guild, draft, settings }) {
   };
   insertEntry(entry);
   upsertPnl({ thread_id: messageId, container_id: thread.id, guild_id: guild.id, forum_id: forumId, outcome, pnl_cents: entry.pnl_cents, potential_cents: entry.potential_cents, date_local: f.date, source: 'bot' });
+  if (accountId) setTradeAccount(messageId, accountId);
   return { thread, messageId, existing: !!threadId, usedV2, tagApplied };
 }
 

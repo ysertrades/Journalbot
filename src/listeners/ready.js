@@ -3,6 +3,7 @@ const { Listener } = require('@sapphire/framework');
 const cron = require('node-cron');
 const { purgeDrafts, listConfiguredGuilds, getSettings } = require('../lib/db');
 const { tick } = require('../lib/reports');
+const { watchTick } = require('../lib/account-watch');
 const { scanGuild } = require('../lib/scanner');
 const { allForums } = require('../lib/routing');
 
@@ -15,6 +16,7 @@ class ReadyListener extends Listener {
     const safe = (name, fn) => async () => { try { await fn(); } catch (e) { log.error(`[journal] ${name} failed`, e); } };
     cron.schedule('* * * * *', safe('report tick', () => tick(client)));        // weekly / month-end scheduler (idempotent, with 6h catch-up)
     cron.schedule('*/10 * * * *', safe('draft purge', async () => purgeDrafts()));
+    cron.schedule('* * * * *', safe('account watch', () => watchTick(client)));   // prop firm alerts: limits, breaches, a passed eval
     cron.schedule('30 3 * * *', safe('nightly rescan', async () => {            // safety net for edits made while the bot was offline
       for (const gid of listConfiguredGuilds()) {
         const guild = client.guilds.cache.get(gid), s = getSettings(gid);
