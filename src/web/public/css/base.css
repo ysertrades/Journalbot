@@ -1,0 +1,79 @@
+/* YSER Journal: the studio look of the yserbot site, with the lights off.
+   One flat charcoal floor with a quiet dot grid, matte panels with hairlines,
+   ink-white buttons, the serif italic turn, mono kickers. No gradients on
+   surfaces; colour is kept for money and state. */
+@font-face { font-family: 'Inter'; font-weight: 500; font-display: swap; src: url(/fonts/Inter-Medium.ttf) format('truetype'); }
+@font-face { font-family: 'Inter'; font-weight: 600; font-display: swap; src: url(/fonts/Inter-SemiBold.ttf) format('truetype'); }
+@font-face { font-family: 'Inter'; font-weight: 800; font-display: swap; src: url(/fonts/Inter-ExtraBold.ttf) format('truetype'); }
+@font-face { font-family: 'JB Mono'; font-weight: 400; font-display: swap; src: url(/fonts/JetBrainsMono-Regular.ttf) format('truetype'); }
+@font-face { font-family: 'Instrument Serif'; font-style: italic; font-weight: 400; font-display: swap; src: url(/fonts/InstrumentSerif-Italic.ttf) format('truetype'); }
+:root {
+  --floor: #0b0c0e; --floor2: #0e0f12; --panel: #131417; --panel2: #18191d; --panel3: #1e2025;
+  --line: rgba(255, 255, 255, .07); --line2: rgba(255, 255, 255, .12); --line3: rgba(255, 255, 255, .2);
+  --ink: #eeeff2; --ink2: #c9ccd3; --soft: #9a9ea8; --grey: #6f737d;
+  --win: #3ccf7a; --loss: #f87171; --be: #f5b84b; --blurple: #7983ff; --missed: #94a3b8;
+  --win-a: rgba(60, 207, 122, .12); --loss-a: rgba(248, 113, 113, .12); --be-a: rgba(245, 184, 75, .12); --blurple-a: rgba(121, 131, 255, .14);
+  --sans: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif; --serif: 'Instrument Serif', Georgia, serif; --mono: 'JB Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  --ease: cubic-bezier(.22, .8, .2, 1); --spring: cubic-bezier(.34, 1.4, .5, 1);
+  --r-sm: 10px; --r: 16px; --r-lg: 24px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; overflow-x: clip; -webkit-text-size-adjust: 100%; }
+body { margin: 0; min-height: 100vh; color: var(--ink); background: var(--floor); font: 500 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+/* the dot grid, like dotted notebook paper: fixed, even, flat */
+body::before { content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, .07) 1px, transparent 1.4px); background-size: 28px 28px; }
+a { color: inherit; }
+img { max-width: 100%; display: block; }
+h1, h2, h3, h4 { margin: 0; text-wrap: balance; letter-spacing: -.03em; font-weight: 800; }
+p { margin: 0; }
+em { font-family: var(--serif); font-style: italic; font-weight: 400; color: var(--soft); letter-spacing: -.01em; }
+::selection { background: var(--blurple); color: #fff; }
+:focus-visible { outline: 2px solid var(--blurple); outline-offset: 2px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+
+/* ── bits ── */
+.kicker { font: 400 11.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--grey); }
+.mono { font-family: var(--mono); font-weight: 400; font-variant-numeric: tabular-nums; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--grey); flex: none; }
+.dot.live { background: var(--win); box-shadow: 0 0 0 3px rgba(60, 207, 122, .18); animation: breathe 2.4s var(--ease) infinite; }
+@keyframes breathe { 50% { box-shadow: 0 0 0 7px rgba(60, 207, 122, 0); } }
+.win { color: var(--win); } .loss { color: var(--loss); } .be { color: var(--be); } .missed { color: var(--missed); } .muted { color: var(--grey); } .soft { color: var(--soft); }
+
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line2); font-weight: 600; font-size: 14px; }
+.pill .tile { width: 24px; height: 24px; border-radius: 8px; background: var(--floor); display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--line); }
+.pill .sub { color: var(--grey); font-weight: 500; padding-left: 9px; border-left: 1px solid var(--line2); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 17px; border: 0; border-radius: 999px; cursor: pointer;
+  font: 600 14.5px/1 var(--sans); text-decoration: none; white-space: nowrap; color: var(--ink); background: var(--panel2); box-shadow: inset 0 0 0 1px var(--line2);
+  transition: transform .25s var(--ease), background-color .25s var(--ease), box-shadow .25s var(--ease), opacity .2s; }
+.btn svg { width: 16px; height: 16px; flex: none; }
+.btn.white { background: #f4f5f7; color: #0b0c0e; box-shadow: 0 10px 24px -14px rgba(255, 255, 255, .35); }
+.btn.blurple { background: #5865f2; color: #fff; box-shadow: 0 10px 26px -14px rgba(88, 101, 242, .9); }
+.btn.ghost { background: transparent; }
+.btn.danger { color: var(--loss); box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .35); background: transparent; }
+.btn.sm { height: 32px; padding: 0 13px; font-size: 13px; }
+.btn.lg { height: 50px; padding: 0 24px; font-size: 16px; }
+.btn.icon { width: 36px; padding: 0; }
+.btn[disabled], .btn.busy { opacity: .5; pointer-events: none; }
+.btn.busy::after { content: ''; width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (hover: hover) { .btn:hover { transform: translateY(-1px); background-color: var(--panel3); } .btn.white:hover { background: #fff; } .btn.blurple:hover { background: #6670f4; } .btn.ghost:hover { background: var(--panel); } }
+.btn:active { transform: scale(.97); }
+
+.panel { position: relative; background: var(--panel); border-radius: var(--r-lg); box-shadow: inset 0 0 0 1px var(--line); }
+.tab-tab { display: inline-block; width: 46px; height: 3px; border-radius: 2px; background: var(--grey); }
+
+/* the outcome tab on a panel's top edge, like a coloured index tab */
+.tabbed::before { content: ''; position: absolute; left: 24px; top: -1.5px; width: 48px; height: 3px; border-radius: 2px; background: var(--tab, transparent); }
+
+/* popup / message pages */
+body.popup { display: grid; place-items: center; padding: 24px; }
+.popup-card { position: relative; z-index: 1; display: grid; gap: 12px; justify-items: start; max-width: 420px; padding: 26px; border-radius: var(--r-lg); background: var(--panel); box-shadow: inset 0 0 0 1px var(--line2); }
+.popup-card p { color: var(--soft); }
+
+/* scroll reveal: elements rise into place once */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity .8s var(--ease), transform .8s var(--ease); transition-delay: var(--d, 0s); }
+.reveal.in { opacity: 1; transform: none; }

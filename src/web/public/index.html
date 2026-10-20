@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>YSER Journal · trade journaling in Discord</title>
+  <meta name="description" content="Log trades in Discord in seconds, import your broker CSV, and get daily, weekly and monthly PnL cards. Then open the journal on the web.">
+  <meta name="theme-color" content="#0b0c0e">
+  <meta property="og:title" content="YSER Journal">
+  <meta property="og:description" content="Every trade, journaled in Discord. PnL cards, a web journal and a control panel for the bot.">
+  <meta property="og:image" content="/samples/dark-weekly-sample.png">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/base.css?v=__V__">
+  <link rel="stylesheet" href="/css/landing.css?v=__V__">
+</head>
+<body>
+  <nav class="nav" aria-label="Main">
+    <a class="brand" href="#top"><img src="/favicon.svg" alt="" width="26" height="26">YSER <em>journal</em></a>
+    <div class="links"><a href="#features">Features</a><a href="#cards">The cards</a><a href="#web">Web journal</a><a href="#faq">FAQ</a></div>
+    <div class="nav-cta">
+      <a class="btn ghost sm invite-link" href="#" hidden>Add to Discord</a>
+      <a class="btn white sm" href="/app" id="open-app">Open the journal</a>
+    </div>
+  </nav>
+
+  <main id="top">
+    <!-- hero -->
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="pill reveal"><span class="tile"><span class="dot live"></span></span>Journal bot <span class="sub" id="live-line">online</span></span>
+        <h1 class="reveal" style="--d:.06s">Every trade,<br><em>journaled in Discord.</em></h1>
+        <p class="lead reveal" style="--d:.12s">Log a trade in thirty seconds or drop your broker's CSV. The bot posts it to your forum, keeps your PnL, and draws daily, weekly and month-end cards. Open the web journal for the calendar, the ledger and the numbers behind your edge.</p>
+        <div class="cta reveal" style="--d:.18s">
+          <a class="btn blurple lg" href="/auth/login" id="hero-login"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.6 19.6 0 0 0 15.4 3l-.6 1.3a18 18 0 0 0-5.6 0L8.6 3a19.5 19.5 0 0 0-4.9 1.5C.6 9 .1 13.5.3 17.9a19.8 19.8 0 0 0 6 3l1.3-2.1a12.7 12.7 0 0 1-2-1l.5-.4a14 14 0 0 0 12 0l.5.4a12.7 12.7 0 0 1-2 1l1.3 2.1a19.7 19.7 0 0 0 6-3c.4-5.1-.7-9.6-3.6-13.5ZM8.5 15.2c-1.2 0-2.1-1-2.1-2.3s.9-2.3 2.1-2.3 2.1 1 2.1 2.3-.9 2.3-2.1 2.3Zm7 0c-1.2 0-2.1-1-2.1-2.3s.9-2.3 2.1-2.3 2.1 1 2.1 2.3-.9 2.3-2.1 2.3Z"/></svg>Sign in with Discord</a>
+          <a class="btn lg invite-link" href="#" hidden>Add the bot</a>
+        </div>
+        <dl class="stats reveal" style="--d:.24s">
+          <div><dt>Trades journaled</dt><dd data-count="trades">0</dd></div>
+          <div><dt>Journals</dt><dd data-count="journals">0</dd></div>
+          <div><dt>Session</dt><dd>6 PM <span class="soft">ET</span></dd></div>
+        </dl>
+      </div>
+
+      <!-- the stage: dark cards floating over a tilted floor -->
+      <div class="stage reveal" style="--d:.1s" aria-hidden="true">
+        <div class="plane" id="plane">
+          <div class="card c1"><span class="k">TODAY</span><span class="v win">+$2,150</span><span class="spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+          <div class="card c2"><span class="k">WIN RATE</span><span class="v">71%</span><span class="ring"></span></div>
+          <div class="card c3 cal"><span class="k">OCTOBER</span><span class="grid">
+            <b class="g"></b><b class="r"></b><b class="g"></b><b class="g"></b><b></b>
+            <b class="g"></b><b class="y"></b><b class="g"></b><b class="r"></b><b class="g"></b>
+            <b class="g"></b><b class="g"></b><b class="r"></b><b class="g"></b><b class="g"></b></span></div>
+          <div class="card c4 diff"><span class="k">NQ LONG · 09:31</span><code><i>+</i> RESULT: +2.5R<br><i>+</i> PNL: +$1,240</code></div>
+          <div class="chip c5"><span class="dot live"></span>Imported 14 trades</div>
+          <div class="chip c6">5 green days <span class="win">▲</span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="marquee" aria-hidden="true"><div class="track">
+      <span>/journal in 30 seconds</span><span>CSV import, never twice</span><span>Daily 4:5 card</span><span>Weekly &amp; month-end reports</span><span>/trades ledger</span><span>/edit-trade later</span><span>Studio &amp; Night</span><span>6 PM ET trading day</span><span>Web journal</span><span>Control panel</span>
+      <span>/journal in 30 seconds</span><span>CSV import, never twice</span><span>Daily 4:5 card</span><span>Weekly &amp; month-end reports</span><span>/trades ledger</span><span>/edit-trade later</span><span>Studio &amp; Night</span><span>6 PM ET trading day</span><span>Web journal</span><span>Control panel</span>
+    </div></div>
+
+    <!-- features -->
+    <section class="features" id="features">
+      <header class="head reveal"><span class="kicker">What it does</span><h2>A journal that <em>keeps up with you.</em></h2></header>
+      <div class="bento">
+        <article class="f wide reveal">
+          <div class="art art-log"><div class="row-a"><span class="ob w">Win</span><span class="ob">Loss</span><span class="ob">BE</span><span class="ob">Missed</span></div><div class="row-b"><span>NQ · Long · NY AM</span><span class="win mono">+$1,240</span></div><div class="row-c"><span class="bar"></span><span class="bar s"></span></div></div>
+          <div><h3>Log in thirty seconds</h3><p>Pick the outcome, type the symbol and the PnL, add a chart. <code>/journal</code> posts it to the right forum with your notes, lessons and R.</p></div>
+        </article>
+        <article class="f reveal" style="--d:.06s">
+          <div class="art art-csv"><span class="file">hyperprop.csv</span><span class="ln"><b class="win">✨ 12 new</b></span><span class="ln muted">♻️ 31 already imported</span></div>
+          <div><h3>Drop your CSV</h3><p>Hyperprop, Tradovate, TopstepX or any sheet. Re-export as often as you like: every trade is matched and only the new ones post.</p></div>
+        </article>
+        <article class="f reveal">
+          <div class="art art-cards"><img src="/samples/dark-daily-pnl-sample.png" alt="" loading="lazy"></div>
+          <div><h3>Cards worth posting</h3><p>A 4:5 daily card, a weekly week, a month-end calendar and a full ledger, in Studio or Night.</p></div>
+        </article>
+        <article class="f reveal" style="--d:.06s">
+          <div class="art art-clock"><span class="t">7:15 PM</span><span class="arr">→</span><span class="d">Tuesday</span></div>
+          <div><h3>The futures day</h3><p>The session rolls at 6 PM New York time, so evening trades land on the next day, the way your broker counts them.</p></div>
+        </article>
+        <article class="f reveal" style="--d:.12s">
+          <div class="art art-edit"><span class="chk">📷 chart <b class="win">added</b></span><span class="chk">✍️ lesson <b class="win">added</b></span><span class="chk muted">post rewritten in place</span></div>
+          <div><h3>Fix it later</h3><p>Add the chart or the lesson after the close. The original post is rewritten, the numbers follow.</p></div>
+        </article>
+        <article class="f wide reveal">
+          <div class="art art-auto"><span class="when"><span class="dot live"></span> Friday 17:00</span><span class="what">Weekly report posted to <b>#pnl</b></span><span class="when"><span class="dot live"></span> Oct 31 17:00</span><span class="what">Month-end calendar posted</span></div>
+          <div><h3>Reports on autopilot</h3><p>The weekly card every Friday and the month-end calendar on the last day, at the time you pick, with a role ping if you want one. Missed while offline? It catches up.</p></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- the cards -->
+    <section class="show" id="cards">
+      <header class="head reveal"><span class="kicker">The cards</span><h2>Your numbers, <em>drawn properly.</em></h2></header>
+      <div class="show-ui reveal">
+        <div class="seg" role="tablist" id="card-tabs">
+          <button role="tab" aria-selected="true" data-card="daily-pnl">Day</button><button role="tab" data-card="weekly">Week</button><button role="tab" data-card="monthly">Month</button><button role="tab" data-card="trades">Ledger</button>
+        </div>
+        <div class="seg" id="theme-tabs"><button aria-pressed="false" data-theme="">Studio</button><button aria-pressed="true" data-theme="dark-">Night</button></div>
+      </div>
+      <div class="show-frame reveal"><img id="card-img" src="/samples/dark-daily-pnl-sample.png" alt="A sample PnL card"></div>
+    </section>
+
+    <!-- web journal -->
+    <section class="web" id="web">
+      <header class="head reveal"><span class="kicker">The web journal</span><h2>The journal, <em>and the control panel.</em></h2>
+        <p class="lead">Sign in with Discord and everything the bot knows is on one page. Change the bot's settings without a single slash command.</p></header>
+      <div class="mock reveal" id="mock">
+        <aside><b class="mb">YSER <em>journal</em></b><span class="on">Overview</span><span>Calendar</span><span>Trades</span><span>Insights</span><span>Log a trade</span><span>Import</span><span>Cards</span><span>Settings</span></aside>
+        <div class="mm">
+          <div class="mh"><h3>This week, <em>in the green.</em></h3><span class="seg mini"><b>Day</b><b class="on">Week</b><b>Month</b></span></div>
+          <div class="mk"><span><i>NET</i><b class="win">+$3,330</b></span><span><i>WIN RATE</i><b>64%</b></span><span><i>PROFIT FACTOR</i><b>2.8</b></span><span><i>EXPECTANCY</i><b>+$303</b></span></div>
+          <svg class="mc" viewBox="0 0 600 150" preserveAspectRatio="none"><path class="area" d="M0 130 L60 112 L120 118 L180 92 L240 98 L300 70 L360 76 L420 50 L480 58 L540 30 L600 26 L600 150 L0 150Z"/><path class="line" d="M0 130 L60 112 L120 118 L180 92 L240 98 L300 70 L360 76 L420 50 L480 58 L540 30 L600 26"/></svg>
+          <div class="mt"><span><b class="win">●</b> NQ Long <i>09:31</i><b class="win">+$1,240</b></span><span><b class="loss">●</b> ES Short <i>10:02</i><b class="loss">−$310</b></span><span><b class="win">●</b> NQ Long <i>11:20</i><b class="win">+$980</b></span></div>
+        </div>
+      </div>
+      <ul class="ticks reveal">
+        <li><b>Overview</b> net, win rate, profit factor, expectancy, drawdown and streaks for any period</li>
+        <li><b>Calendar</b> every trading day coloured by PnL, week totals, click a day for its trades</li>
+        <li><b>Trades</b> search and filter the ledger, open a trade and add the chart or the lesson</li>
+        <li><b>Insights</b> by symbol, setup, weekday, hour, side, hold time and R</li>
+        <li><b>Log &amp; import</b> post a trade or a whole CSV from the browser</li>
+        <li><b>Control panel</b> forums, reports, schedule, theme, trading day, rescans and fixes</li>
+      </ul>
+    </section>
+
+    <!-- faq -->
+    <section class="faq" id="faq">
+      <header class="head reveal"><span class="kicker">Questions</span><h2>Good to <em>know.</em></h2></header>
+      <div class="qs">
+        <details class="reveal"><summary>Who can open a server's journal?</summary><p>The same people who can use <code>/journal</code>: the server's allowed users, or anyone with Manage Server when no list is set. Settings always need Manage Server.</p></details>
+        <details class="reveal"><summary>Which brokers does the CSV import read?</summary><p>Anything with a symbol and a PnL column: Hyperprop, Tradovate, TopstepX, NinjaTrader exports and plain sheets. Side, size, prices, times, fees and hold time are read when present.</p></details>
+        <details class="reveal"><summary>Why did my 7 PM trade land on tomorrow?</summary><p>Futures sessions open at 6 PM New York time, so evening trades belong to the next trading day. You can switch to a forex session or the plain calendar in Settings.</p></details>
+        <details class="reveal"><summary>Can I put the panel inside Whop?</summary><p>Yes. Allow Whop as a frame ancestor and add the panel's address as an app view. Sign-in opens in a small window and comes straight back.</p></details>
+        <details class="reveal"><summary>Is my data shared anywhere?</summary><p>No. Everything stays in the bot's own database and your Discord forums. Discord login only reads your name and the servers you share with the bot.</p></details>
+      </div>
+    </section>
+
+    <section class="end reveal">
+      <h2>Your next trade <em>deserves a page.</em></h2>
+      <div class="cta"><a class="btn white lg" href="/app">Open the journal</a><a class="btn lg invite-link" href="#" hidden>Add to Discord</a></div>
+    </section>
+  </main>
+
+  <footer class="foot"><span>YSER <em>trades</em></span><span class="muted">Not financial advice. Trading involves risk.</span></footer>
+  <script src="/js/landing.js?v=__V__"></script>
+</body>
+</html>

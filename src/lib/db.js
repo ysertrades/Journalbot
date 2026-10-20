@@ -221,6 +221,18 @@ function entryDetailsFor(keys) {
   for (const k of keys) { const r = byMsg.get(k) || byThread.get(k); if (r) out[k] = r; }
   return out;
 }
+/** the full journal row behind each PnL key (latest by message, else the post), for the web journal */
+function entriesForKeys(keys) {
+  const byMsg = db.prepare('SELECT * FROM journal_entries WHERE message_id = ? ORDER BY id DESC LIMIT 1');
+  const byThread = db.prepare('SELECT * FROM journal_entries WHERE thread_id = ? ORDER BY id ASC LIMIT 1');
+  const out = {};
+  for (const k of keys) { const r = byMsg.get(k) || byThread.get(k); if (r) out[k] = r; }
+  return out;
+}
+/** counts for the public landing page: servers with a journal, trades logged */
+function publicCounts() {
+  return { trades: db.prepare("SELECT COUNT(*) AS n FROM pnl_entries WHERE outcome != 'missed'").get().n, journals: db.prepare('SELECT COUNT(DISTINCT guild_id) AS n FROM pnl_entries').get().n };
+}
 /** which of these trade keys this server already imported (a trade is a match if any of its keys is) */
 function importedHashes(guildId, hashes) {
   const q = db.prepare('SELECT 1 FROM journal_imports WHERE guild_id = ? AND hash = ?');
@@ -319,4 +331,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, entriesForKeys, publicCounts, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };

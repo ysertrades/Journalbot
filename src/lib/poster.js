@@ -21,6 +21,8 @@ const imageRecord = (att) => ({ name: att.name, url: att.url, contentType: att.c
 const safeName = (n) => String(n || 'chart.png').replace(/[^\w.\-]+/g, '_').slice(-64) || 'chart.png';
 
 async function downloadImage(rec) {
+  // a picture uploaded from the web journal arrives as base64 instead of a Discord CDN link
+  if (rec.data) return new AttachmentBuilder(Buffer.from(rec.data, 'base64'), { name: safeName(rec.name) });
   const res = await fetch(rec.url);
   if (!res.ok) throw new Error(`Could not download the picture (${res.status}). Add it again.`);
   const buf = Buffer.from(await res.arrayBuffer());

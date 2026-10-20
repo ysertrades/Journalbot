@@ -22,6 +22,7 @@ class ReadyListener extends Listener {
       }
     }));
     setTimeout(safe('startup tick', () => tick(client)), 15_000);                  // catch up on anything missed while offline
+    try { require('../web/server').startWeb(client); } catch (e) { log.error('[web] could not start', e); }   // the landing page and web journal
   }
 }
 module.exports = { ReadyListener };

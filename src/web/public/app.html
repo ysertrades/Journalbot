@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>YSER Journal</title>
+  <meta name="theme-color" content="#0b0c0e">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/base.css?v=__V__">
+  <link rel="stylesheet" href="/css/app.css?v=__V__">
+</head>
+<body class="booting">
+  <div id="gate" class="gate" hidden>
+    <div class="gate-card">
+      <img src="/favicon.svg" alt="" width="52" height="52">
+      <h1>Your journal, <em>on the web.</em></h1>
+      <p id="gate-text">Sign in with the Discord account you journal with. You'll see every server you share with the bot.</p>
+      <button class="btn blurple lg" id="gate-login" type="button">Sign in with Discord</button>
+      <a class="muted gate-home" href="/" id="gate-home">Back to the home page</a>
+    </div>
+  </div>
+
+  <div id="shell" class="shell" hidden>
+    <aside class="side" id="side">
+      <a class="brand" href="#/overview"><img src="/favicon.svg" alt="" width="26" height="26"><span>YSER <em>journal</em></span></a>
+      <button class="server" id="server-btn" type="button" aria-haspopup="listbox"><span class="ic" id="server-ic"></span><span class="nm" id="server-name">Server</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+      <div class="server-menu" id="server-menu" role="listbox" hidden></div>
+      <nav class="nav" id="nav">
+        <span class="nav-k">Journal</span>
+        <a href="#/overview" data-page="overview"><svg viewBox="0 0 24 24"><path d="M4 13h4v7H4zM10 4h4v16h-4zM16 9h4v11h-4z"/></svg>Overview</a>
+        <a href="#/calendar" data-page="calendar"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Calendar</a>
+        <a href="#/trades" data-page="trades"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg>Trades</a>
+        <a href="#/insights" data-page="insights"><svg viewBox="0 0 24 24"><path d="M12 3v9l7 4"/><circle cx="12" cy="12" r="9"/></svg>Insights</a>
+        <span class="nav-k">Add</span>
+        <a href="#/log" data-page="log"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Log a trade</a>
+        <a href="#/import" data-page="import"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>Import CSV</a>
+        <a href="#/cards" data-page="cards"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 15l2-3 2 2 2-4"/></svg>Cards</a>
+        <span class="nav-k manage-only">Bot</span>
+        <a href="#/settings" data-page="settings" class="manage-only"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Control panel</a>
+      </nav>
+      <div class="side-foot">
+        <button class="kbd-hint" id="palette-btn" type="button"><span>Jump to…</span><kbd>Ctrl K</kbd></button>
+        <div class="me"><img id="me-av" alt="" width="30" height="30"><span id="me-name"></span><button class="btn ghost icon sm" id="logout" type="button" title="Sign out"><svg viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg></button></div>
+      </div>
+    </aside>
+    <button class="burger" id="burger" type="button" aria-label="Menu"><span></span><span></span></button>
+
+    <main class="main" id="main">
+      <header class="top"><div class="crumbs"><span class="kicker" id="page-kicker">Journal</span><h1 id="page-title">Overview</h1></div><div class="top-tools" id="top-tools"></div></header>
+      <div id="view" class="view"></div>
+    </main>
+  </div>
+
+  <div class="drawer-scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true"><div class="drawer-in" id="drawer-in"></div></aside>
+  <div class="palette" id="palette" hidden><div class="palette-box"><input id="palette-input" placeholder="Jump to a page, or search trades…" autocomplete="off"><div id="palette-list"></div></div></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/js/charts.js?v=__V__"></script>
+  <script src="/js/app.js?v=__V__"></script>
+</body>
+</html>
