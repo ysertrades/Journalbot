@@ -65,7 +65,7 @@ test('picking a period acknowledges at once, then shows the ledger image with th
   const i = { customId: 'tr:range', values: ['week'], guildId: 'gt', guild: { id: 'gt', channels: { fetch: async () => null } }, user: { id: 'u' }, memberPermissions: { has: () => true },
     deferUpdate: async () => calls.push('defer'), editReply: async (p) => calls.push(p), reply: async (p) => calls.push(p) };
   const parsed = TradesComponents.prototype.parse.call({ some: (x) => ({ x }), none: () => null }, i);
-  assert.deepEqual(parsed.x, { range: 'week', page: 0, anchor: null, account: null });
+  assert.deepEqual(parsed.x, { range: 'week', page: 0, anchor: null });
   await TradesComponents.prototype.run.call(self, i, parsed.x);
   assert.equal(calls[0], 'defer');
   const last = calls.at(-1);
@@ -76,9 +76,7 @@ test('picking a period acknowledges at once, then shows the ledger image with th
 
 test('page buttons carry everything needed; malformed ids are ignored', () => {
   const parse = (customId) => TradesComponents.prototype.parse.call({ some: (x) => x, none: () => null }, { customId });
-  assert.deepEqual(parse('tr:pg:month:2:2026-10-15'), { range: 'month', page: 2, anchor: '2026-10-15', account: null });
-  assert.deepEqual(parse('tr:pg:month:2:2026-10-15:7'), { range: 'month', page: 2, anchor: '2026-10-15', account: 7 });
-  assert.equal(parse('tr:pg:month:2:2026-10-15:x'), null);
+  assert.deepEqual(parse('tr:pg:month:2:2026-10-15'), { range: 'month', page: 2, anchor: '2026-10-15' });
   assert.equal(parse('tr:pg:year:2:2026-10-15'), null);
   assert.equal(parse('tr:pg:month:x:2026-10-15'), null);
   assert.equal(parse('tr:pg:month:1:yesterday'), null);
