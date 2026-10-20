@@ -28,18 +28,62 @@
     }, 520 + 3 * beat + hold);                                  // the line draws, "Market open." lands, then the curtain lifts
   }
 
-  // the stage and the web mock lean toward the pointer
-  const plane = $('#plane'), mock = $('#mock');
-  if (!reduce && matchMedia('(hover: hover)').matches) {
-    let raf = 0;
-    addEventListener('pointermove', (e) => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const x = e.clientX / innerWidth - 0.5, y = e.clientY / innerHeight - 0.5;
-        if (plane) { plane.style.setProperty('--rx', `${52 - y * 10}deg`); plane.style.setProperty('--rz', `${-24 + x * 12}deg`); }
-        if (mock) { const r = mock.getBoundingClientRect(); if (r.top < innerHeight && r.bottom > 0) { mock.style.setProperty('--my', `${x * 6}deg`); mock.style.setProperty('--mx', `${6 - y * 6}deg`); } }
+  // ── motion: one loop eases the scroll, its speed and the pointer, and every scene reads from it ──
+  // Nothing jumps to where the wheel or the finger put it: each value glides toward its target, frame
+  // by frame, and the loop sleeps once everything has settled. Scenes are CSS: they only read the vars.
+  //   --x  the hero leaving (0 → 1): the board tilts toward you and its cards lift apart, the copy drifts up
+  //   --e  each [data-s] element entering (0 → 1), with its own offset for a stagger
+  //   --v  scroll speed, which leans the marquee; --mo slides it along with the page
+  const plane = $('#plane'), mock = $('#mock'), hero = $('.hero'), copy = $('.hero-copy'), marquee = $('.marquee'), track = $('.track');
+  const scenes = $$('[data-s]');
+  if (reduce) scenes.forEach((el) => el.style.setProperty('--e', '1'));
+  else {
+    const fine = matchMedia('(hover: hover)').matches;
+    const m = { y: scrollY, ly: scrollY, v: 0, px: 0, py: 0, tx: 0, ty: 0, x: -1 };
+    let tops = [], heroH = 1, half = 1, vh = innerHeight, raf = 0, last = 0;
+    const measure = () => {
+      vh = innerHeight; heroH = Math.max(1, hero ? hero.offsetHeight : 1); half = Math.max(1, (track?.scrollWidth || 2) / 2);
+      // from the layout (offsetTop), never the painted box: a scene's own motion must not move where it starts
+      tops = scenes.map((el) => { let y = 0; for (let n = el; n; n = n.offsetParent) y += n.offsetTop; return y; });
+    };
+    const clamp = (n) => (n < 0 ? 0 : n > 1 ? 1 : n);
+    const put = (el, k, v) => { if (el && el['_' + k] !== v) { el['_' + k] = v; el.style.setProperty(k, v); } };
+    const frame = (t) => {
+      const dt = Math.min(64, last ? t - last : 16.7); last = t;
+      const ease = (r) => 1 - Math.pow(1 - r, dt / 16.7);                // the same glide at 60 Hz and at 120 Hz
+      const target = scrollY;
+      m.y += (target - m.y) * ease(0.14);
+      m.v += ((target - m.ly) / (dt / 16.7) - m.v) * ease(0.1); m.ly = target;
+      m.px += (m.tx - m.px) * ease(0.08); m.py += (m.ty - m.py) * ease(0.08);
+
+      const x = clamp(m.y / (heroH * 0.85));
+      if (Math.abs(x - m.x) > 0.0004 || fine) {
+        m.x = x;
+        put(plane, '--rx', `${(52 - x * 20 - m.py * 10).toFixed(2)}deg`);
+        put(plane, '--rz', `${(-24 + x * 30 + m.px * 12).toFixed(2)}deg`);
+        put(plane, '--lift', `${(-x * 60).toFixed(1)}px`);
+        put(plane, '--sp', x.toFixed(3));
+        put(copy, '--x', x.toFixed(3));
+      }
+      scenes.forEach((el, i) => {
+        const raw = (vh - (tops[i] - m.y)) / (vh * 0.6) - (+el.dataset.s || 0);
+        put(el, '--e', clamp(raw).toFixed(3));
       });
-    }, { passive: true });
+      if (mock && fine) { put(mock, '--my', `${(m.px * 7).toFixed(2)}deg`); put(mock, '--mx', `${(6 - m.py * 6).toFixed(2)}deg`); }
+      put(marquee, '--v', Math.max(-14, Math.min(14, m.v * 0.35)).toFixed(2));
+      put(track, '--mo', `${(-(m.y * 0.45) % half).toFixed(1)}px`);
+
+      const settled = Math.abs(target - m.y) < 0.3 && Math.abs(m.v) < 0.02 && Math.abs(m.tx - m.px) < 0.001 && Math.abs(m.ty - m.py) < 0.001;
+      raf = settled ? 0 : requestAnimationFrame(frame);
+      if (settled) last = 0;
+    };
+    const wake = () => { if (!raf) raf = requestAnimationFrame(frame); };
+    addEventListener('scroll', wake, { passive: true });
+    addEventListener('resize', () => { measure(); wake(); });
+    if (fine) addEventListener('pointermove', (e) => { m.tx = e.clientX / innerWidth - 0.5; m.ty = e.clientY / innerHeight - 0.5; wake(); }, { passive: true });
+    addEventListener('load', () => { measure(); wake(); });
+    document.fonts?.ready.then(() => { measure(); wake(); });
+    measure(); wake();
   }
 
   // live numbers: count up from zero
