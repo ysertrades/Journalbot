@@ -34,7 +34,7 @@ code { font: 400 .9em var(--mono); color: var(--ink2); background: var(--panel2)
 /* the stage: a tilted floor with matte cards hovering over it, following the pointer */
 .stage { position: relative; height: 560px; perspective: 1400px; perspective-origin: 50% 35%; }
 .plane { position: absolute; left: 50%; top: 50%; width: 540px; height: 430px; margin: -215px 0 0 -270px; transform-style: preserve-3d;
-  transform: rotateX(var(--rx, 52deg)) rotateZ(var(--rz, -24deg)); transition: transform 1s var(--ease); }
+  transform: translateY(var(--lift, 0px)) rotateX(var(--rx, 52deg)) rotateZ(var(--rz, -24deg)); }   /* eased in landing.js, never a CSS transition: those restart on every move and stutter */
 .plane::before { content: ''; position: absolute; inset: -40px; border-radius: 40px; background-image: radial-gradient(rgba(255, 255, 255, .12) 1px, transparent 1.6px); background-size: 22px 22px; box-shadow: inset 0 0 0 1px var(--line); }
 .card, .chip { position: absolute; transform-style: preserve-3d; will-change: transform; }
 .card { width: 230px; height: 112px; border-radius: 18px; padding: 15px 17px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line2); display: grid; align-content: start; gap: 7px;
@@ -85,9 +85,9 @@ code { font: 400 .9em var(--mono); color: var(--ink2); background: var(--panel2)
 
 .bento { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .f { position: relative; display: grid; grid-template-rows: auto 1fr; gap: 20px; padding: 22px; border-radius: var(--r-lg); background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden;
-  transition: transform .5s var(--ease), box-shadow .5s var(--ease); }
+  transition: translate .5s var(--ease), box-shadow .5s var(--ease); }
 .f.wide { grid-column: span 2; grid-template-columns: 1.2fr 1fr; grid-template-rows: none; align-items: center; }
-@media (hover: hover) { .f:hover { transform: translateY(-4px); box-shadow: inset 0 0 0 1px var(--line3); } }
+@media (hover: hover) { .f:hover { translate: 0 -4px; box-shadow: inset 0 0 0 1px var(--line3); } }
 .f h3 { font-size: 21px; margin-bottom: 6px; }
 .f p { color: var(--soft); font-size: 15px; }
 .art { min-height: 150px; border-radius: 18px; background: var(--floor); box-shadow: inset 0 0 0 1px var(--line); padding: 16px; display: grid; gap: 10px; align-content: center; overflow: hidden; }
@@ -120,7 +120,7 @@ code { font: 400 .9em var(--mono); color: var(--ink2); background: var(--panel2)
 
 /* web journal mock */
 .mock { display: grid; grid-template-columns: 190px 1fr; border-radius: 26px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line2), 0 50px 90px -50px #000; overflow: hidden;
-  transform: perspective(1600px) rotateX(var(--mx, 8deg)) rotateY(var(--my, 0deg)); transition: transform .9s var(--ease); }
+  transform-origin: 50% 0; }
 .mock aside { display: grid; align-content: start; gap: 2px; padding: 18px 12px; background: var(--floor2); border-right: 1px solid var(--line); }
 .mock aside span { padding: 8px 12px; border-radius: 10px; color: var(--soft); font-size: 14px; }
 .mock aside span.on { background: var(--panel2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
@@ -195,9 +195,52 @@ section[id] { scroll-margin-top: 96px; }
 @keyframes ping { from { scale: 1; opacity: .55; } to { scale: 3.6; opacity: 0; } }
 
 /* after the curtain: the cards come down onto the board, each on its own beat */
-.stage.land .card { animation: hover 6s ease-in-out var(--hd, 0s) infinite, descend 1.1s var(--spring) var(--ld, 0s) both; }
-.stage.land .chip { animation: hoverchip 5s ease-in-out var(--hd, 0s) infinite, descend 1.1s var(--spring) var(--ld, 0s) both; }
+.stage.land .card { animation: hover 6s ease-in-out var(--hd, 0s) infinite, descend 1.1s var(--spring) var(--ld, 0s) backwards; }
+.stage.land .chip { animation: hoverchip 5s ease-in-out var(--hd, 0s) infinite, descend 1.1s var(--spring) var(--ld, 0s) backwards; }
 @keyframes descend { from { opacity: 0; scale: 1.35; translate: 0 -40px; } }
 .plane::before { transition: opacity 1.2s var(--ease); }
 .stage.pre .plane::before { opacity: 0; }
 .stage.pre .card, .stage.pre .chip { opacity: 0; }
+
+/* ── scroll scenes ──
+   landing.js eases the scroll and hands each part a number: --x as the hero leaves, --e as a part arrives
+   (0 → 1, with a stagger). Everything below is a pure function of those, so motion follows the page
+   smoothly in both directions, never a one-off pop. Without the script, every part simply sits in place. */
+
+/* the hero leaving: the copy drifts up and softens, the board tilts toward you and its cards lift apart */
+.hero-copy { transform: translateY(calc(var(--x, 0) * -90px)); opacity: calc(1 - var(--x, 0) * 1.15); filter: blur(calc(var(--x, 0) * 6px)); will-change: transform, opacity; }
+.card, .chip { translate: 0 0 calc(var(--sp, 0) * var(--z) * 1.5); }
+
+/* the marquee leans into the scroll's speed and slides along with the page */
+.marquee { transform: skewX(calc(var(--v, 0) * -1deg)); }
+.track { translate: var(--mo, 0px) 0; }
+
+/* section heads: rise out of a blur, the italic half slides in a beat behind */
+.head[data-s] { --k: calc(1 - var(--e, 1)); transform: translateY(calc(var(--k) * 56px)); opacity: calc(var(--e, 1) * 1.5 - .3); filter: blur(calc(var(--k) * 10px)); }
+.head[data-s] h2 em { display: inline-block; transform: translateX(calc(var(--k) * 70px)) skewX(calc(var(--k) * -14deg)); opacity: calc(var(--e, 1) * 1.8 - .7); }
+
+/* feature cards: stand up from the floor, one after another */
+.f[data-s] { --k: calc(1 - var(--e, 1)); transform-origin: 50% 100%;
+  transform: perspective(1100px) translateY(calc(var(--k) * 90px)) rotateX(calc(var(--k) * 34deg)) scale(calc(1 - var(--k) * .08)); opacity: calc(var(--e, 1) * 1.6 - .2); }
+.f[data-s] .art { transform: translateY(calc(var(--k) * 30px)) scale(calc(1 + var(--k) * .06)); }
+
+/* the card showcase: lies back, then sits up into the frame */
+.show-frame[data-s] { --k: calc(1 - var(--e, 1)); transform-origin: 50% 0;
+  transform: perspective(1500px) translateY(calc(var(--k) * 70px)) rotateX(calc(var(--k) * 28deg)) scale(calc(1 - var(--k) * .1)); opacity: calc(var(--e, 1) * 1.7 - .3); }
+.show-frame[data-s] img { translate: 0 calc(var(--k) * 40px); }
+
+/* the web journal: swings up from a steep tilt; on a mouse it keeps leaning toward the pointer */
+.mock[data-s] { --k: calc(1 - var(--e, 1));
+  transform: perspective(1600px) translateY(calc(var(--k) * 110px)) rotateX(calc(var(--mx, 6deg) + var(--k) * 34deg)) rotateY(var(--my, 0deg)) scale(calc(1 - var(--k) * .12));
+  opacity: calc(var(--e, 1) * 1.6 - .2); }
+
+/* the feature list and the questions slide in from alternate sides */
+.ticks li[data-s], details[data-s] { --k: calc(1 - var(--e, 1)); transform: translate(calc(var(--k) * var(--from, -60px)), calc(var(--k) * 24px)); opacity: calc(var(--e, 1) * 1.6 - .2); }
+.ticks li[data-s]:nth-child(3n + 2) { --from: 0px; } .ticks li[data-s]:nth-child(3n) { --from: 60px; }
+details[data-s]:nth-child(even) { --from: 60px; }
+
+/* the closing card opens out toward you */
+.end[data-s] { --k: calc(1 - var(--e, 1)); transform: perspective(1200px) translateY(calc(var(--k) * 60px)) rotateX(calc(var(--k) * 18deg)) scale(calc(1 - var(--k) * .14)); opacity: calc(var(--e, 1) * 1.5 - .2); }
+.end[data-s] h2 { letter-spacing: -.045em; transform: translateY(calc(var(--k) * 30px)); }
+
+/* reduced motion: landing.js pins every --e at 1 and never moves --x or --v, so all of the above rests at identity */

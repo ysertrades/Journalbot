@@ -76,29 +76,29 @@
 
     <!-- features -->
     <section class="features" id="features">
-      <header class="head reveal"><span class="kicker">What it does</span><h2>A journal that <em>keeps up with you.</em></h2></header>
+      <header class="head" data-s="0"><span class="kicker">What it does</span><h2>A journal that <em>keeps up with you.</em></h2></header>
       <div class="bento">
-        <article class="f wide reveal">
+        <article class="f wide" data-s="0">
           <div class="art art-log"><div class="row-a"><span class="ob w">Win</span><span class="ob">Loss</span><span class="ob">BE</span><span class="ob">Missed</span></div><div class="row-b"><span>NQ · Long · NY AM</span><span class="win mono">+$1,240</span></div><div class="row-c"><span class="bar"></span><span class="bar s"></span></div></div>
           <div><h3>Log in thirty seconds</h3><p>Pick the outcome, type the symbol and the PnL, add a chart. <code>/journal</code> posts it to the right forum with your notes, lessons and R.</p></div>
         </article>
-        <article class="f reveal" style="--d:.06s">
+        <article class="f" data-s=".12">
           <div class="art art-csv"><span class="file">hyperprop.csv</span><span class="ln"><b class="win">✨ 12 new</b></span><span class="ln muted">♻️ 31 already imported</span></div>
           <div><h3>Drop your CSV</h3><p>Hyperprop, Tradovate, TopstepX or any sheet. Re-export as often as you like: every trade is matched and only the new ones post.</p></div>
         </article>
-        <article class="f reveal">
+        <article class="f" data-s="0">
           <div class="art art-cards"><img src="/samples/dark-daily-pnl-sample.png" alt="" loading="lazy"></div>
           <div><h3>Cards worth posting</h3><p>A 4:5 daily card, a weekly week, a month-end calendar and a full ledger, in Studio or Night.</p></div>
         </article>
-        <article class="f reveal" style="--d:.06s">
+        <article class="f" data-s=".1">
           <div class="art art-clock"><span class="t">7:15 PM</span><span class="arr">→</span><span class="d">Tuesday</span></div>
           <div><h3>The futures day</h3><p>The session rolls at 6 PM New York time, so evening trades land on the next day, the way your broker counts them.</p></div>
         </article>
-        <article class="f reveal" style="--d:.12s">
+        <article class="f" data-s=".2">
           <div class="art art-edit"><span class="chk">📷 chart <b class="win">added</b></span><span class="chk">✍️ lesson <b class="win">added</b></span><span class="chk muted">post rewritten in place</span></div>
           <div><h3>Fix it later</h3><p>Add the chart or the lesson after the close. The original post is rewritten, the numbers follow.</p></div>
         </article>
-        <article class="f wide reveal">
+        <article class="f wide" data-s="0">
           <div class="art art-auto"><span class="when"><span class="dot live"></span> Friday 17:00</span><span class="what">Weekly report posted to <b>#pnl</b></span><span class="when"><span class="dot live"></span> Oct 31 17:00</span><span class="what">Month-end calendar posted</span></div>
           <div><h3>Reports on autopilot</h3><p>The weekly card every Friday and the month-end calendar on the last day, at the time you pick, with a role ping if you want one. Missed while offline? It catches up.</p></div>
         </article>
@@ -107,21 +107,21 @@
 
     <!-- the cards -->
     <section class="show" id="cards">
-      <header class="head reveal"><span class="kicker">The cards</span><h2>Your numbers, <em>drawn properly.</em></h2></header>
+      <header class="head" data-s="0"><span class="kicker">The cards</span><h2>Your numbers, <em>drawn properly.</em></h2></header>
       <div class="show-ui reveal">
         <div class="seg" role="tablist" id="card-tabs">
           <button role="tab" aria-selected="true" data-card="daily-pnl">Day</button><button role="tab" data-card="weekly">Week</button><button role="tab" data-card="monthly">Month</button><button role="tab" data-card="trades">Ledger</button>
         </div>
         <div class="seg" id="theme-tabs"><button aria-pressed="false" data-theme="">Studio</button><button aria-pressed="true" data-theme="dark-">Night</button></div>
       </div>
-      <div class="show-frame reveal"><img id="card-img" src="/samples/dark-daily-pnl-sample.png" alt="A sample PnL card"></div>
+      <div class="show-frame" data-s="0"><img id="card-img" src="/samples/dark-daily-pnl-sample.png" alt="A sample PnL card"></div>
     </section>
 
     <!-- web journal -->
     <section class="web" id="web">
-      <header class="head reveal"><span class="kicker">The web journal</span><h2>The journal, <em>and the control panel.</em></h2>
+      <header class="head" data-s="0"><span class="kicker">The web journal</span><h2>The journal, <em>and the control panel.</em></h2>
         <p class="lead">Sign in with Discord and everything the bot knows is on one page. Change the bot's settings without a single slash command.</p></header>
-      <div class="mock reveal" id="mock">
+      <div class="mock" id="mock" data-s="0">
         <aside><b class="mb">YSER <em>journal</em></b><span class="on">Overview</span><span>Calendar</span><span>Trades</span><span>Insights</span><span>Log a trade</span><span>Import</span><span>Cards</span><span>Settings</span></aside>
         <div class="mm">
           <div class="mh"><h3>This week, <em>in the green.</em></h3><span class="seg mini"><b>Day</b><b class="on">Week</b><b>Month</b></span></div>
@@ -130,29 +130,29 @@
           <div class="mt"><span><b class="win">●</b> NQ Long <i>09:31</i><b class="win">+$1,240</b></span><span><b class="loss">●</b> ES Short <i>10:02</i><b class="loss">−$310</b></span><span><b class="win">●</b> NQ Long <i>11:20</i><b class="win">+$980</b></span></div>
         </div>
       </div>
-      <ul class="ticks reveal">
-        <li><b>Overview</b> net, win rate, profit factor, expectancy, drawdown and streaks for any period</li>
-        <li><b>Calendar</b> every trading day coloured by PnL, week totals, click a day for its trades</li>
-        <li><b>Trades</b> search and filter the ledger, open a trade and add the chart or the lesson</li>
-        <li><b>Insights</b> by symbol, setup, weekday, hour, side, hold time and R</li>
-        <li><b>Log &amp; import</b> post a trade or a whole CSV from the browser</li>
-        <li><b>Control panel</b> forums, reports, schedule, theme, trading day, rescans and fixes</li>
+      <ul class="ticks">
+        <li data-s="0"><b>Overview</b> net, win rate, profit factor, expectancy, drawdown and streaks for any period</li>
+        <li data-s=".08"><b>Calendar</b> every trading day coloured by PnL, week totals, click a day for its trades</li>
+        <li data-s=".16"><b>Trades</b> search and filter the ledger, open a trade and add the chart or the lesson</li>
+        <li data-s="0"><b>Insights</b> by symbol, setup, weekday, hour, side, hold time and R</li>
+        <li data-s=".08"><b>Log &amp; import</b> post a trade or a whole CSV from the browser</li>
+        <li data-s=".16"><b>Control panel</b> forums, reports, schedule, theme, trading day, rescans and fixes</li>
       </ul>
     </section>
 
     <!-- faq -->
     <section class="faq" id="faq">
-      <header class="head reveal"><span class="kicker">Questions</span><h2>Good to <em>know.</em></h2></header>
+      <header class="head" data-s="0"><span class="kicker">Questions</span><h2>Good to <em>know.</em></h2></header>
       <div class="qs">
-        <details class="reveal"><summary>Who can open a server's journal?</summary><p>The same people who can use <code>/journal</code>: the server's allowed users, or anyone with Manage Server when no list is set. Settings always need Manage Server.</p></details>
-        <details class="reveal"><summary>Which brokers does the CSV import read?</summary><p>Anything with a symbol and a PnL column: Hyperprop, Tradovate, TopstepX, NinjaTrader exports and plain sheets. Side, size, prices, times, fees and hold time are read when present.</p></details>
-        <details class="reveal"><summary>Why did my 7 PM trade land on tomorrow?</summary><p>Futures sessions open at 6 PM New York time, so evening trades belong to the next trading day. You can switch to a forex session or the plain calendar in Settings.</p></details>
-        <details class="reveal"><summary>Can I put the panel inside Whop?</summary><p>Yes. Allow Whop as a frame ancestor and add the panel's address as an app view. Sign-in opens in a small window and comes straight back.</p></details>
-        <details class="reveal"><summary>Is my data shared anywhere?</summary><p>No. Everything stays in the bot's own database and your Discord forums. Discord login only reads your name and the servers you share with the bot.</p></details>
+        <details data-s="0"><summary>Who can open a server's journal?</summary><p>The same people who can use <code>/journal</code>: the server's allowed users, or anyone with Manage Server when no list is set. Settings always need Manage Server.</p></details>
+        <details data-s="0"><summary>Which brokers does the CSV import read?</summary><p>Anything with a symbol and a PnL column: Hyperprop, Tradovate, TopstepX, NinjaTrader exports and plain sheets. Side, size, prices, times, fees and hold time are read when present.</p></details>
+        <details data-s="0"><summary>Why did my 7 PM trade land on tomorrow?</summary><p>Futures sessions open at 6 PM New York time, so evening trades belong to the next trading day. You can switch to a forex session or the plain calendar in Settings.</p></details>
+        <details data-s="0"><summary>Can I put the panel inside Whop?</summary><p>Yes. Allow Whop as a frame ancestor and add the panel's address as an app view. Sign-in opens in a small window and comes straight back.</p></details>
+        <details data-s="0"><summary>Is my data shared anywhere?</summary><p>No. Everything stays in the bot's own database and your Discord forums. Discord login only reads your name and the servers you share with the bot.</p></details>
       </div>
     </section>
 
-    <section class="end reveal">
+    <section class="end" data-s="0">
       <h2>Your next trade <em>deserves a page.</em></h2>
       <div class="cta"><a class="btn white lg" href="/app">Open the journal</a><a class="btn lg invite-link" href="#" hidden>Add to Discord</a></div>
     </section>
