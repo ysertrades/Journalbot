@@ -2,7 +2,6 @@
 const { Command } = require('@sapphire/framework');
 const { ApplicationIntegrationType, InteractionContextType } = require('discord.js');
 const { isAllowed } = require('../lib/permissions');
-const { getSettings } = require('../lib/db');
 const { pickerPanel } = require('../lib/trades-view');
 const { card, ephemeral, ERROR_COLOR } = require('../lib/ui');
 
@@ -17,7 +16,7 @@ class TradesCommand extends Command {
   async chatInputRun(interaction) {
     if (!interaction.guild) return interaction.reply(ephemeral(card('Use this inside a server.')));
     if (!isAllowed(interaction)) return interaction.reply(ephemeral(card('You are not allowed to use the journal.', ERROR_COLOR)));
-    return interaction.reply(ephemeral(pickerPanel(interaction.guildId, getSettings(interaction.guildId))));
+    return interaction.reply(ephemeral(pickerPanel()));
   }
 }
 module.exports = { TradesCommand };

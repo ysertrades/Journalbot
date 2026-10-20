@@ -15,7 +15,7 @@ const {
   ModalBuilder, SectionBuilder, SeparatorBuilder, SeparatorSpacingSize, StringSelectMenuBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle,
 } = require('discord.js');
 const { DateTime } = require('luxon');
-const { editableTrades, updateEntry, upsertPnl, tradeAccountOf } = require('./db');
+const { editableTrades, updateEntry, upsertPnl } = require('./db');
 const { OUTCOMES, TRADE_COLOR, buildPostBody, threadTitle, emojiToken, clip } = require('./format');
 const { formatCents, formatR } = require('./money');
 const { summaryTrade, summaryResult, summaryNotes } = require('./panels');
@@ -251,10 +251,6 @@ function editorPanel(draft, guild, settings, { notice, saved } = {}) {
     sec('Notes', mark('notes', notesLine), 'notes', summaryNotes(draft) === '⬜ Optional' ? 'Add' : 'Edit'),
     sec('Chart', picLine, 'pic', pic ? 'Replace' : 'Add'),
   );
-  // the account it counts toward: moving it is instant (the post itself does not change)
-  const { accountPicker } = require('./panels');
-  const acctRow = accountPicker(`te:${id}:acct`, draft.guildId, settings, tradeAccountOf(ed.key), { placeholder: 'Move to another account' });
-  if (acctRow) c.addActionRowComponents(acctRow);
   c.addSeparatorComponents(sep());
   c.addTextDisplayComponents(td(changes.length
     ? `✏️ **Unsaved:** ${changes.join(', ')}\n-# Save rewrites the post and updates /pnl and /trades.`

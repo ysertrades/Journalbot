@@ -18,22 +18,6 @@ const btn = (id, label, style = ButtonStyle.Secondary, o = {}) => {
 const row = (...c) => new ActionRowBuilder().addComponents(...c);
 const SESSIONS = ['Asia', 'London', 'NY AM', 'NY PM', 'Other'];
 
-/**
- * A select of the server's active accounts, or null when there are none. current: an account id; when
- * empty, the default account is shown as chosen. The value "default" means "the default account".
- */
-function accountPicker(customId, guildId, settings, current, { placeholder = 'Account', allOption = false } = {}) {
-  const { listAccounts } = require('./db');
-  const { label, badge, PHASES } = require('./accounts');
-  const list = listAccounts(guildId, { includeEnded: allOption }).filter((a) => a.status !== 'archived').slice(0, allOption ? 24 : 25);
-  if (!list.length) return null;
-  const chosen = current ? Number(current) : allOption ? null : settings.default_account_id;
-  const opts = list.map((a) => ({ value: String(a.id), label: label(a).slice(0, 100), emoji: PHASES[a.phase]?.emoji,
-    description: `${badge(a)}${a.id === settings.default_account_id ? ' · default' : ''}${a.status !== 'active' ? ` · ${a.status}` : ''}`.slice(0, 100), default: chosen === a.id }));
-  if (allOption) opts.unshift({ value: 'all', label: 'All accounts', emoji: '\u{1F4DA}', description: 'Every trade, every account', default: !chosen });
-  return row(new StringSelectMenuBuilder().setCustomId(customId).setPlaceholder(placeholder).setMinValues(1).setMaxValues(1).addOptions(opts));
-}
-
 /* ======================= JOURNAL PANEL ======================= */
 function missingParts(d) {
   const f = d.fields, m = [];
@@ -92,8 +76,6 @@ function journalPanel(draft, guild, settings, { notice } = {}) {
     .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(1).setMaxValues(1);
   if (draft.forumId) sel.setDefaultChannels(draft.forumId);
   c.addActionRowComponents(row(sel));
-  const acctRow = accountPicker(`jr:${id}:acct`, draft.guildId, settings, draft.fields._account);
-  if (acctRow) { c.addTextDisplayComponents(td('**Account**\n-# Which account this trade counts toward')); c.addActionRowComponents(acctRow); }
   c.addActionRowComponents(row(
     btn(`jr:${id}:preview`, 'Preview', ButtonStyle.Secondary, { disabled: !draft.outcome }),
     btn(`jr:${id}:post`, 'Post', ButtonStyle.Success, { disabled: !isReady(draft) }),
@@ -165,14 +147,6 @@ function csvPreviewPanel(draft, guild, settings, imp, { sparkline }) {
   }
   if (notes.length) c.addTextDisplayComponents(td(`-# ${notes.join('\n-# ')}`));
   const postable = tr.filter((t) => routeTarget(settings, t.outcome)).length;
-  // which account the file belongs to: chosen here, and every imported trade is tagged with it
-  const acctRow = tr.length ? accountPicker(`jr:${draft.id}:acct`, draft.guildId, settings, imp.account ?? draft.fields._account, { placeholder: 'Import into account' }) : null;
-  if (acctRow) {
-    const { getAccount } = require('./db'), { label } = require('./accounts');
-    const a = getAccount(imp.account ?? draft.fields._account ?? settings.default_account_id);
-    c.addTextDisplayComponents(td(`**\u{1F3E6} Into account** ${a ? `· ${label(a)}` : ''}\n-# Every trade in this file is tagged with it; /trades, /pnl and /account can then show it on its own`));
-    c.addActionRowComponents(acctRow);
-  }
   c.addActionRowComponents(row(
     btn(`jr:${draft.id}:csvgo`, postable ? `Import ${postable} trade${postable === 1 ? '' : 's'}` : 'Nothing to import', ButtonStyle.Success, { disabled: !postable }),
     ...(manual.length ? [btn(`jr:${draft.id}:csvinc`, `Include ${manual.length} hand-logged`)] : []),
@@ -282,18 +256,15 @@ function describeTarget(s, key) {
   return s.default_forum_id ? `*not set, uses default* <#${s.default_forum_id}>` : '*not set*';
 }
 
-const PAGES = [['general', 'General'], ['outcomes', 'Outcome forums'], ['schedule', 'Schedule'], ['accounts', 'Accounts'], ['look', 'Appearance'], ['advanced', 'Advanced']];
+const PAGES = [['general', 'General'], ['outcomes', 'Outcome forums'], ['schedule', 'Schedule'], ['look', 'Appearance'], ['advanced', 'Advanced']];
 const SWATCH = 'theme-preview.png';
 
 function settingsPanel(page, s, healthLines) {
   const c = new ContainerBuilder().setAccentColor(NEUTRAL_COLOR);
   c.addTextDisplayComponents(td(`# Journal Settings\n-# ${PAGES.find(([k]) => k === page)[1]} · changes save instantly`));
-  const nav = PAGES.map(([k, l]) => btn(`js:nav:${k}`, l, k === page ? ButtonStyle.Primary : ButtonStyle.Secondary));
-  c.addActionRowComponents(row(...nav.slice(0, 3)), row(...nav.slice(3)));
+  c.addActionRowComponents(row(...PAGES.map(([k, l]) => btn(`js:nav:${k}`, l, k === page ? ButtonStyle.Primary : ButtonStyle.Secondary))));
   c.addSeparatorComponents(sep());
-  if (page === 'accounts') {
-    require('./account-panels').accountsSection(c, s);
-  } else if (page === 'general') {
+  if (page === 'general') {
     c.addTextDisplayComponents(td(`**Extra forums to scan for PnL**\n-# Outcome forums and the default forum are scanned automatically\n${mention(s.forums)}`));
     const f = new ChannelSelectMenuBuilder().setCustomId('js:general:forums').setPlaceholder('Select extra forums to scan')
       .setChannelTypes(ChannelType.GuildForum, ChannelType.GuildMedia).setMinValues(0).setMaxValues(25);
@@ -399,4 +370,4 @@ function pickPanel({ key, forumId, posts, page, settings }) {
   return c;
 }
 
-module.exports = { accountPicker, pickPanel, describeTarget, journalPanel, summaryTrade, summaryResult, summaryNotes, csvModal, csvPreviewPanel, csvProgressCard, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS, SWATCH };
+module.exports = { pickPanel, describeTarget, journalPanel, summaryTrade, summaryResult, summaryNotes, csvModal, csvPreviewPanel, csvProgressCard, previewPanel, tradeModal, resultModal, notesModal, pictureModal, simpleModal, settingsPanel, missingParts, isReady, td, sep, btn, row, DAYS, SWATCH };

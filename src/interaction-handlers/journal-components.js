@@ -63,12 +63,6 @@ class JournalComponents extends InteractionHandler {
       saveDraft(draft); return i.update({ components: [csvPreviewPanel(draft, i.guild, settings, imp, { sparkline })] });
     }
     if (action === 'csvgo') return this.runImport(i, draft, settings);
-    if (action === 'acct') {   // the account this trade (or this import) counts toward
-      const v = Number(i.values?.[0]); if (v) draft.fields._account = v; else delete draft.fields._account;
-      saveDraft(draft);
-      if (draft.fields._import) { draft.fields._import.account = v || null; saveDraft(draft); return i.update({ components: [csvPreviewPanel(draft, i.guild, settings, draft.fields._import, { sparkline })] }); }
-      return refresh();
-    }
     if (action === 'forum') {
       draft.forumId = i.values[0]; draft.fields._forum_manual = true; delete draft.fields._thread; saveDraft(draft); return refresh();
     }
@@ -115,7 +109,7 @@ class JournalComponents extends InteractionHandler {
     for (let n = 0; n < batch.length; n++) {
       const t = batch[n], target = routeTarget(settings, t.outcome);
       const one = { id: draft.id, userId: draft.userId, outcome: t.outcome, forumId: target.forumId, image: null,
-        fields: { ...toFields(t, { tag: draft.fields._import_tag }), ...(target.threadId ? { _thread: target.threadId } : {}), ...((imp.account ?? draft.fields._account) ? { _account: imp.account ?? draft.fields._account } : {}) } };
+        fields: { ...toFields(t, { tag: draft.fields._import_tag }), ...(target.threadId ? { _thread: target.threadId } : {}) } };
       try {
         const { thread, messageId } = await postJournal({ guild: i.guild, draft: one, settings });
         markImported(i.guildId, keysOf(t), messageId);
