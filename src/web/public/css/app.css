@@ -250,3 +250,82 @@ textarea.input { height: auto; min-height: 84px; padding: 11px 13px; resize: ver
 .top-tools { max-width: 100%; }
 .top-tools .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .top-tools .seg::-webkit-scrollbar { display: none; }
+
+/* ── phones: the sidebar is a sheet that fits the visible screen and scrolls on its own ── */
+.main { overflow-x: clip; }
+@supports not (overflow: clip) { .main { overflow-x: hidden; } }
+.card-h { flex-wrap: wrap; row-gap: 6px; }
+.card-h .kicker { white-space: normal; line-height: 1.5; }
+.nav-scrim { display: none; }
+@media (max-width: 900px) {
+  .side { height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); padding-top: calc(18px + env(safe-area-inset-top, 0px)); transition: transform .5s var(--ease); }
+  .side .nav { overflow: visible; flex: none; }
+  .nav-scrim { display: block; position: fixed; inset: 0; z-index: 29; background: rgba(0, 0, 0, .55); opacity: 0; pointer-events: none; transition: opacity .4s var(--ease); }
+  body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+  body.nav-open { overflow: hidden; touch-action: none; }
+  body.nav-open .side { touch-action: pan-y; }
+  .burger { top: calc(14px + env(safe-area-inset-top, 0px)); }
+}
+
+/* ── phones: the calendar keeps every amount inside its day ── */
+.day .ds { display: none; }
+@media (max-width: 760px) {
+  .cal { gap: 5px; }
+  .day { min-height: 58px; padding: 6px 5px 7px; border-radius: 11px; }
+  .day .dn { font-size: 10.5px; }
+  .day .dv { display: none; }
+  .day .ds { display: block; font: 800 12px/1 var(--sans); letter-spacing: -.03em; text-align: center; white-space: nowrap; }
+  .day.has { background: color-mix(in srgb, var(--tab) 14%, var(--panel)); }
+  .day.has::before { left: 50%; width: 18px; margin-left: -9px; }
+}
+
+/* ── phones: the ledger becomes a stack of trade cards ── */
+.tcards { display: none; }
+@media (max-width: 760px) {
+  .tbl-wrap.ledger { display: none; }
+  .tcards { display: grid; gap: 8px; }
+  .tc { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 13px 14px 12px 18px; border-radius: 16px; background: var(--floor2);
+    box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; transition: transform .3s var(--ease), background-color .3s; -webkit-tap-highlight-color: transparent; }
+  .tc:active { transform: scale(.985); background: var(--panel2); }
+  .tc::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--tab); }
+  .tc .a { font-weight: 800; font-size: 15.5px; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tc .a .side-tag { margin-left: 2px; }
+  .tc .m { font: 800 16px/1.2 var(--sans); letter-spacing: -.02em; text-align: right; white-space: nowrap; }
+  .tc .b, .tc .c { font: 400 11.5px/1.4 var(--mono); color: var(--grey); }
+  .tc .c { text-align: right; }
+  .tc .chips { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tc .chips span { padding: 4px 8px; border-radius: 8px; background: var(--panel); font: 400 11px var(--mono); color: var(--soft); }
+  .filters .select, .filters .input { flex: 1 1 calc(50% - 8px); }
+  .filters .search { flex-basis: 100%; }
+}
+
+/* ── smooth: pages slide in piece by piece, nothing jumps ── */
+.view.entering > * { animation: rise-in .6s var(--ease) both; animation-delay: calc(var(--i, 0) * 55ms); }
+@keyframes rise-in { from { opacity: 0; transform: translateY(14px); } }
+.view.entering { animation: none; }
+.view { transition: opacity .25s var(--ease), transform .3s var(--ease); }
+.view.leaving { opacity: 0; transform: translateY(-6px); }
+.card, .kpi, .li, .tc, .day, .btn, .seg button, .nav a, .server { will-change: auto; }
+.drawer { transition: transform .55s cubic-bezier(.2, .9, .2, 1); }
+.drawer-in > * { animation: rise-in .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms + 80ms); }
+
+/* ── the intro: a splash while the journal loads; its mark flies into the sidebar, the rest cascades in ── */
+.splash { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; align-content: center; gap: 18px; background: var(--floor); transition: opacity .55s var(--ease) .2s; }
+.splash::before { content: ''; position: absolute; inset: 0; z-index: -1; background-image: radial-gradient(rgba(255, 255, 255, .07) 1px, transparent 1.4px); background-size: 28px 28px; }
+.splash-mark { width: 64px; height: 64px; border-radius: 18px; animation: mark-pop .8s var(--spring) both; transition: transform .85s cubic-bezier(.7, 0, .2, 1), border-radius .85s; will-change: transform; }
+.splash-t { font: 400 12px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--grey); animation: fade-up .6s .15s var(--ease) both; transition: opacity .3s; }
+.splash-bar { width: 150px; height: 3px; border-radius: 2px; background: var(--panel3); overflow: hidden; animation: fade-up .6s .25s var(--ease) both; transition: opacity .3s; }
+.splash-bar i { display: block; width: 38%; height: 100%; border-radius: 2px; background: var(--win); animation: sweep 1.1s cubic-bezier(.6, 0, .4, 1) infinite; }
+.splash.fly .splash-t, .splash.fly .splash-bar { opacity: 0; }
+.splash.done { opacity: 0; pointer-events: none; }
+.splash.gone { display: none; }
+@keyframes mark-pop { from { opacity: 0; transform: scale(.55) rotate(-10deg); } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(8px); } }
+@keyframes sweep { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
+@media (min-width: 901px) { .shell.intro .side { animation: side-in .8s var(--ease) both; } }
+@keyframes side-in { from { opacity: 0; transform: translateX(-26px); } }
+.shell.intro .side .brand img { opacity: 0; transition: opacity .2s .6s; }
+.shell.intro.landed .side .brand img { opacity: 1; }
+.shell.intro .nav > *, .shell.intro .server, .shell.intro .side-foot > * { animation: rise-in .55s var(--ease) both; animation-delay: calc(var(--i, 0) * 32ms + .3s); }
+.shell.intro .top { animation: rise-in .65s var(--ease) .22s both; }

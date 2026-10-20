@@ -6,7 +6,29 @@
 
   // rise into place once, as each part scrolls in
   const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -8% 0px', threshold: 0.12 });
-  $$('.reveal, .mock').forEach((el) => io.observe(el));
+  const stage = $('.stage');
+  const start = () => { stage?.classList.remove('pre'); stage?.classList.add('land'); $$('.reveal, .mock').forEach((el) => io.observe(el)); };
+
+  // the intro, "the open": once per visit, skipped for reduced motion
+  const intro = $('#intro');
+  let seen = false; try { seen = sessionStorage.getItem('jb_open') === '1'; sessionStorage.setItem('jb_open', '1'); } catch { /* private mode: play it */ }
+  if (!intro || reduce || seen) { intro?.classList.add('gone'); start(); }
+  else {
+    stage?.classList.add('pre');
+    document.documentElement.style.overflow = 'hidden';
+    const clock = $('#intro-clock'), ticks = ['09:29:57', '09:29:58', '09:29:59', '09:30:00'];
+    const timers = [];
+    const finish = () => {
+      timers.forEach(clearTimeout);
+      intro.classList.add('open', 'lift'); document.documentElement.style.overflow = '';
+      setTimeout(start, 380);                                   // the hero rises as the curtain clears it
+      setTimeout(() => intro.classList.add('gone'), 1100);
+    };
+    ticks.forEach((t, i) => timers.push(setTimeout(() => { clock.textContent = t; if (i === ticks.length - 1) intro.classList.add('open'); }, 520 + i * 330)));
+    timers.push(setTimeout(finish, 520 + 3 * 330 + 1700));        // the line draws, "Market open" lands, then the curtain lifts
+    $('#intro-skip').addEventListener('click', finish);
+    intro.addEventListener('click', (e) => { if (e.target === intro) finish(); });
+  }
 
   // the stage and the web mock lean toward the pointer
   const plane = $('#plane'), mock = $('#mock');

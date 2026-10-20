@@ -18,6 +18,8 @@
     return v > 0 ? `${sign ? '+' : ''}${S.currency}${s}` : v < 0 ? `−${S.currency}${s}` : `${S.currency}0`;
   };
   const tone = (v) => (v > 0 ? 'win' : v < 0 ? 'loss' : 'be');
+  /** a calendar day on a phone: +797, −1.2k, +12k (no symbol, no cents) */
+  const short = (v) => { const a = Math.abs(v), s = a >= 10000 ? `${Math.round(a / 1000)}k` : a >= 1000 ? `${(a / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${Math.round(a)}`; return v > 0 ? `+${s}` : v < 0 ? `−${s}` : '0'; };
   const day = (iso, f = { weekday: 'short', month: 'short', day: 'numeric' }) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', f);
   const turn = (v, n) => (!n ? 'nothing logged.' : v > 0 ? 'in the green.' : v < 0 ? 'in the red.' : 'dead flat.');
   async function api(path, { method = 'GET', body } = {}) {
@@ -53,6 +55,7 @@
 
   /* ---------- sign in ---------- */
   function showGate(text) {
+    $('#splash')?.classList.add('done'); setTimeout(() => $('#splash')?.classList.add('gone'), 800);
     $('#shell').hidden = true; $('#gate').hidden = false; document.body.classList.remove('booting');
     if (text) $('#gate-text').textContent = text;
     if (embedded) $('#gate-home').hidden = true;
@@ -87,11 +90,28 @@
     S.me = me; S.csrf = me.csrf;
     if (!me.guilds.length) return showGate('None of your servers have the journal bot yet, or the journal there is limited to other people. Add the bot, then sign in again.');
     if (!me.guilds.some((x) => x.id === S.gid)) S.gid = me.guilds[0].id;
+    $('#splash-t').textContent = `Opening ${S.me.guilds.find((x) => x.id === S.gid)?.name || 'your journal'}`;
     $('#gate').hidden = true; $('#shell').hidden = false;
     $('#me-name').textContent = me.user.name; if (me.user.avatar) $('#me-av').src = me.user.avatar;
     pickGuild(S.gid, false);
     document.body.classList.remove('booting');
-    route();
+    $('#shell').classList.add('intro');
+    [...$('#nav').children, ...$('.side-foot').children].forEach((c, i) => c.style.setProperty('--i', i));
+    await route();
+    landSplash();
+  }
+  /** the splash's mark flies to the sidebar's logo and becomes it; on a phone it simply fades */
+  function landSplash() {
+    const sp = $('#splash'); if (!sp || sp.classList.contains('gone')) return;
+    const mark = $('#splash-mark'), target = $('.side .brand img'), to = target.getBoundingClientRect(), from = mark.getBoundingClientRect();
+    sp.classList.add('fly');
+    if (to.width && innerWidth > 900 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const s = to.width / (mark.offsetWidth || 64);   // its real size, not mid pop-in
+      mark.style.borderRadius = '30%';
+      mark.style.transform = `translate(${to.left + to.width / 2 - (from.left + from.width / 2)}px, ${to.top + to.height / 2 - (from.top + from.height / 2)}px) scale(${s})`;
+      setTimeout(() => { $('#shell').classList.add('landed'); sp.classList.add('done'); }, 760);
+    } else { sp.classList.add('done'); $('#shell').classList.add('landed'); }
+    setTimeout(() => { sp.classList.add('gone'); $('#shell').classList.remove('intro'); }, 1500);
   }
   function pickGuild(id, rerender = true) {
     S.gid = id; S.guild = S.me.guilds.find((x) => x.id === id); store.set('jb_gid', id);
@@ -108,6 +128,7 @@
   $('#server-menu').addEventListener('click', (e) => { const b = e.target.closest('button[data-id]'); if (b) { $('#server-menu').hidden = true; pickGuild(b.dataset.id); } });
   document.addEventListener('click', (e) => { if (!e.target.closest('#server-menu, #server-btn')) $('#server-menu').hidden = true; });
   $('#burger').addEventListener('click', () => document.body.classList.toggle('nav-open'));
+  $('#nav-scrim').addEventListener('click', () => document.body.classList.remove('nav-open'));
 
   /* ---------- router ---------- */
   const PAGES = {
@@ -125,15 +146,31 @@
     $$('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.page === key));
     document.body.classList.remove('nav-open');
     if ($('#drawer').classList.contains('on')) closeDrawer();
-    view.classList.add('leaving');
-    await new Promise((r) => setTimeout(r, 140));
+    // the old page fades up and out; the page keeps its height so nothing below it jumps
+    view.style.minHeight = `${view.offsetHeight}px`;
+    view.classList.remove('entering'); view.classList.add('leaving');
+    if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
+    await new Promise((r) => setTimeout(r, 180));
     if (seq !== routeSeq) return;
     $('#page-kicker').textContent = `${page.k} · ${S.guild.name}`; $('#page-title').innerHTML = esc(page.t); $('#top-tools').innerHTML = '';
-    view.innerHTML = '<div class="grid g-main"><div class="sk" style="height:320px"></div><div class="sk" style="height:320px"></div></div><div class="kpis">' + '<div class="sk" style="height:86px"></div>'.repeat(6) + '</div>';
-    view.classList.remove('leaving'); view.classList.add('entering');
+    // a skeleton only when the data is slow, so a quick page never flashes one
+    const sk = setTimeout(() => {
+      if (seq !== routeSeq || view.dataset.ready === String(seq)) return;
+      view.innerHTML = '<div class="grid g-main"><div class="sk" style="height:320px"></div><div class="sk" style="height:320px"></div></div><div class="kpis">' + '<div class="sk" style="height:86px"></div>'.repeat(6) + '</div>';
+      view.classList.remove('leaving');
+    }, 260);
     try { await page.run(view, new URLSearchParams(qs || ''), seq); }
     catch (e) { if (seq === routeSeq) view.innerHTML = `<div class="card empty"><span class="em">Something went sideways</span><span>${esc(e.message)}</span><button class="btn" id="retry">Try again</button></div>`; $('#retry')?.addEventListener('click', route); }
-    setTimeout(() => view.classList.remove('entering'), 600);
+    clearTimeout(sk);
+    if (seq !== routeSeq) return;
+    view.dataset.ready = String(seq);
+    enter(view);
+  }
+  /** the new page rises in piece by piece, then lets go of the held height */
+  function enter(view) {
+    [...view.children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 8)));
+    view.classList.remove('leaving', 'entering'); void view.offsetWidth; view.classList.add('entering');
+    setTimeout(() => { view.classList.remove('entering'); view.style.minHeight = ''; }, 1100);
   }
   addEventListener('hashchange', route);
   const rangeSeg = (current, onPick, list = RANGES) => {
@@ -240,7 +277,7 @@
         const iso = `${d.month}-${String(c).padStart(2, '0')}`, x = d.days[c], has = x && (x.trades || x.missed);
         if (x && x.trades) { wp += x.pnl; wn += 1; }
         const tn = x && x.trades ? tone(x.pnl) : 'missed';
-        html += `<div class="day${has ? ' has' : ''}${iso === d.today ? ' today' : ''}" ${has ? `data-day="${iso}" style="--tab:var(--${tn})"` : ''}><span class="dn">${c}</span>${has ? `<span><div class="dv ${x.trades ? tone(x.pnl) : 'missed'}">${x.trades ? money(x.pnl) : 'missed'}</div><div class="dc">${x.trades ? `${x.trades} trade${x.trades === 1 ? '' : 's'}` : ''}${x.missed ? ` · ${x.missed}M` : ''}</div></span>` : ''}</div>`;
+        html += `<div class="day${has ? ' has' : ''}${iso === d.today ? ' today' : ''}" ${has ? `data-day="${iso}" style="--tab:var(--${tn})"` : ''}><span class="dn">${c}</span>${has ? `<span><div class="dv ${x.trades ? tone(x.pnl) : 'missed'}">${x.trades ? money(x.pnl) : 'missed'}</div><div class="ds ${x.trades ? tone(x.pnl) : 'missed'}">${x.trades ? short(x.pnl) : '·'}</div><div class="dc">${x.trades ? `${x.trades} trade${x.trades === 1 ? '' : 's'}` : ''}${x.missed ? ` · ${x.missed}M` : ''}</div></span>` : ''}</div>`;
       }
       wk += 1;
       html += `<div class="wk"><span class="k">WEEK ${wk}</span><span class="v ${wn ? tone(wp) : 'muted'}">${wn ? money(Math.round(wp * 100) / 100) : '—'}</span><span class="k">${wn} day${wn === 1 ? '' : 's'}</span></div>`;
@@ -285,7 +322,13 @@
       $('#page-title').innerHTML = `${d.total} trade${d.total === 1 ? '' : 's'}, <em>${x.count ? money(x.net) : 'none yet'}</em>`;
       $('#tbl-card').innerHTML = !d.trades.length ? '<div class="empty"><span class="em">Nothing matches</span><span>Loosen a filter or search for something else.</span></div>' : `
         <div class="card-h"><span class="kicker">${x.winRate !== null ? `${x.winRate}% win rate · ` : ''}PF ${x.profitFactor === 'inf' ? '∞' : x.profitFactor ?? '—'} · expectancy ${money(x.expectancy)}</span><span class="kicker">page ${d.page + 1} of ${d.pages}</span></div>
-        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Symbol</th><th>Size</th><th>Entry → exit</th><th>Held</th><th>R</th><th>Notes</th><th class="r">PnL</th></tr></thead><tbody>
+        <div class="tcards">${d.trades.map((t) => `<div class="tc" data-key="${esc(t.key)}" style="--tab:${OUT[t.outcome].c}">
+          <span class="a">${esc(t.instrument || '—')}${t.direction ? `<span class="side-tag ${/^l/i.test(t.direction) ? 'win' : 'loss'}">${esc(t.direction)}</span>` : ''}</span>
+          <span class="m ${t.outcome === 'missed' ? 'missed' : tone(t.pnl)}">${t.outcome === 'missed' ? 'Missed' : money(t.pnl)}</span>
+          <span class="b">${esc(day(t.date))}${t.time ? ` · ${t.time}` : ''}</span><span class="c">${t.r !== null ? `${t.r > 0 ? '+' : ''}${t.r}R` : ''}${t.hasChart ? ' 📷' : ''}${t.hasNotes ? ' ✍️' : ''}</span>
+          ${t.qty || t.entry || t.held ? `<span class="chips">${t.qty ? `<span>${t.qty}×</span>` : ''}${t.entry ? `<span>${esc(t.entry)}${t.exit ? ` → ${esc(t.exit)}` : ''}</span>` : ''}${t.held ? `<span>⏱ ${esc(t.held)}</span>` : ''}</span>` : ''}
+        </div>`).join('')}</div>
+        <div class="tbl-wrap ledger"><table class="tbl"><thead><tr><th>Date</th><th>Symbol</th><th>Size</th><th>Entry → exit</th><th>Held</th><th>R</th><th>Notes</th><th class="r">PnL</th></tr></thead><tbody>
         ${d.trades.map((t) => `<tr class="row" data-key="${esc(t.key)}"><td><span class="stripe" style="background:${OUT[t.outcome].c}"></span>${esc(day(t.date))}<span class="muted mono"> ${t.time || ''}</span></td>
           <td class="sym">${esc(t.instrument || '—')}${t.direction ? `<span class="side-tag ${/^l/i.test(t.direction) ? 'win' : 'loss'}">${esc(t.direction)}</span>` : ''}</td><td class="mono">${t.qty ? `${t.qty}×` : '—'}</td>
           <td class="mono">${t.entry ? `${esc(t.entry)}${t.exit ? ` → ${esc(t.exit)}` : ''}` : '—'}</td><td class="mono">${esc(t.held || '—')}</td><td class="mono ${t.r > 0 ? 'win' : t.r < 0 ? 'loss' : ''}">${t.r !== null ? `${t.r > 0 ? '+' : ''}${t.r}R` : '—'}</td>
@@ -361,6 +404,7 @@
   /* ---------- drawer and palette ---------- */
   function drawer(html) {
     $('#drawer-in').innerHTML = html; $('#drawer').classList.add('on'); $('#drawer').setAttribute('aria-hidden', 'false');
+    [...$('#drawer-in').children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 8)));   // its parts rise in as it slides
     const sc = $('#scrim'); sc.hidden = false; requestAnimationFrame(() => sc.classList.add('on'));
     $$('[data-close]', $('#drawer')).forEach((b) => b.addEventListener('click', closeDrawer));
   }

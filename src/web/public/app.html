@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="/css/app.css?v=__V__">
 </head>
 <body class="booting">
+  <!-- the intro: the mark waits here while the journal loads, then flies into the sidebar -->
+  <div class="splash" id="splash" aria-hidden="true"><img class="splash-mark" id="splash-mark" src="/favicon.svg" alt="" width="64" height="64"><span class="splash-t" id="splash-t">Opening your journal</span><span class="splash-bar"><i></i></span></div>
   <div id="gate" class="gate" hidden>
     <div class="gate-card">
       <img src="/favicon.svg" alt="" width="52" height="52">
@@ -43,6 +45,7 @@
         <div class="me"><img id="me-av" alt="" width="30" height="30"><span id="me-name"></span><button class="btn ghost icon sm" id="logout" type="button" title="Sign out"><svg viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg></button></div>
       </div>
     </aside>
+    <div class="nav-scrim" id="nav-scrim"></div>
     <button class="burger" id="burger" type="button" aria-label="Menu"><span></span><span></span></button>
 
     <main class="main" id="main">
