@@ -49,7 +49,7 @@ function summaryNotes(d) {
 function journalPanel(draft, guild, settings, { notice } = {}) {
   const meta = draft.outcome ? OUTCOMES[draft.outcome] : null, id = draft.id, miss = missingParts(draft);
   const status = meta ? `${emojiToken(guild, draft.outcome)} **${meta.label}** · ${miss.length ? `still needed: ${miss.join(', ')}` : 'ready to post'}` : 'Pick an outcome to start';
-  const c = new ContainerBuilder().setAccentColor(meta ? meta.color : NEUTRAL_COLOR);
+  const c = new ContainerBuilder().setAccentColor(NEUTRAL_COLOR);   // dark; the outcome shows in its emoji and the selected button
   c.addTextDisplayComponents(td(`# Journal Entry\n-# ${status}${notice ? `\n${notice}` : ''}`));
   c.addActionRowComponents(row(...Object.values(OUTCOMES).map((o) => {
     const b = btn(`jr:${id}:o:${o.key}`, o.label, draft.outcome === o.key ? o.style : ButtonStyle.Secondary);
@@ -112,8 +112,7 @@ function destLine(settings, outcome) {
 function csvPreviewPanel(draft, guild, settings, imp, { sparkline }) {
   const sym = settings.currency, money = (c) => formatCents(c, { symbol: sym });
   const tr = imp.trades, total = tr.reduce((s, t) => s + t.pnl_cents, 0);
-  const color = total > 0 ? OUTCOMES.win.color : total < 0 ? OUTCOMES.loss.color : OUTCOMES.be.color;
-  const c = new ContainerBuilder().setAccentColor(tr.length ? color : NEUTRAL_COLOR);
+  const c = new ContainerBuilder().setAccentColor(NEUTRAL_COLOR);
   c.addTextDisplayComponents(td(`# \u{1F4E5} Import preview\n-# ${imp.file} · ${imp.format}${imp.truncated ? ' · first 1000 rows' : ''}`));
   // the dedupe ledger: what's new against what the journal already holds
   const manual = imp.manual || [], seenAll = (imp.dupes || 0) + manual.length;
@@ -340,7 +339,7 @@ const POST_PAGE = 25;
 function pickPanel({ key, forumId, posts, page, settings }) {
   const o = OUTCOMES[key], cur = settings.outcome_threads?.[key];
   const pages = Math.max(1, Math.ceil(posts.length / POST_PAGE)), pg = Math.min(Math.max(page, 0), pages - 1);
-  const c = new ContainerBuilder().setAccentColor(o.color);
+  const c = new ContainerBuilder().setAccentColor(NEUTRAL_COLOR);
   c.addTextDisplayComponents(td(`# ${o.label} destination\n-# Currently: ${describeTarget(settings, key)}`));
   c.addSeparatorComponents(sep());
   c.addTextDisplayComponents(td('**1. Forum**'));

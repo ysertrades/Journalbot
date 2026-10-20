@@ -24,7 +24,8 @@ const OUTCOMES = {
   be:     { key: 'be',     label: 'Breakeven', upper: 'BREAKEVEN', color: PALETTE.be,     emojiName: 'ybe',     fallback: '\u{1F7E1}', style: ButtonStyle.Secondary, tag: 'Breakeven' },
   missed: { key: 'missed', label: 'Missed',    upper: 'MISSED',    color: PALETTE.missed, emojiName: 'ymissed', fallback: '\u{1F535}', style: ButtonStyle.Secondary, tag: 'Missed' },
 };
-const NEUTRAL_COLOR = PALETTE.brand;
+// every panel (settings, pickers, forms, notices) is dark like the trade log; colour is kept for outcomes and alerts
+const NEUTRAL_COLOR = PALETTE.ink;
 const TRADE_COLOR = PALETTE.ink;
 const WARN_COLOR = PALETTE.warn;
 const ERROR_COLOR = PALETTE.error;
