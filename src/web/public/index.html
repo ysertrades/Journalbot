@@ -14,6 +14,17 @@
   <link rel="stylesheet" href="/css/landing.css?v=__V__">
 </head>
 <body>
+  <!-- the intro: the open. Removed at once for returning visitors and reduced motion (landing.js). -->
+  <div class="intro" id="intro" aria-hidden="true">
+    <div class="intro-in">
+      <div class="intro-mark"><svg viewBox="0 0 64 64"><path d="M14 22h26"/><path d="M14 32h16"/><path d="M14 42h22"/><circle cx="48" cy="40" r="6"/></svg></div>
+      <div class="intro-clock" id="intro-clock">09:29:57</div>
+      <svg class="intro-line" viewBox="0 0 600 110" preserveAspectRatio="none"><path class="base" d="M0 92 L600 92"/>
+        <path d="M0 92 C40 90 70 74 110 78 S180 96 220 70 S290 44 330 56 S400 34 440 26 S530 22 600 8"/><circle class="halo" cx="600" cy="8" r="6" fill="#3ccf7a"/><circle class="end" cx="600" cy="8" r="6"/></svg>
+      <div class="intro-word">Market open.</div>
+    </div>
+    <button class="intro-skip" id="intro-skip" type="button">Skip</button>
+  </div>
   <nav class="nav" aria-label="Main">
     <a class="brand" href="#top"><img src="/favicon.svg" alt="" width="26" height="26">YSER <em>journal</em></a>
     <div class="links"><a href="#features">Features</a><a href="#cards">The cards</a><a href="#web">Web journal</a><a href="#faq">FAQ</a></div>
