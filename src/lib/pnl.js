@@ -13,10 +13,10 @@ function addTo(b, e) {
 }
 
 /** anchorISO: any date inside the wanted week (YYYY-MM-DD in tz) */
-function weekData(guildId, anchorISO, tz, symbol = '$') {
+function weekData(guildId, anchorISO, tz, symbol = '$', accountId = null) {
   const start = DateTime.fromISO(anchorISO, { zone: tz }).startOf('week'); // ISO week: Monday
   const end = start.plus({ days: 6 });
-  const rows = pnlBetween(guildId, start.toISODate(), end.toISODate());
+  const rows = pnlBetween(guildId, start.toISODate(), end.toISODate(), accountId);
   const days = DAY_NAMES.map((d, i) => {
     const dt = start.plus({ days: i });
     return { day: d, date: dt.setLocale('en').toFormat('LLL d'), iso: dt.toISODate(), ...emptyBucket() };
@@ -54,10 +54,10 @@ function weekData(guildId, anchorISO, tz, symbol = '$') {
   };
 }
 
-function monthData(guildId, year, month, tz, symbol = '$') {
+function monthData(guildId, year, month, tz, symbol = '$', accountId = null) {
   const start = DateTime.fromObject({ year, month, day: 1 }, { zone: tz });
   const end = start.endOf('month');
-  const rows = pnlBetween(guildId, start.toISODate(), end.toISODate());
+  const rows = pnlBetween(guildId, start.toISODate(), end.toISODate(), accountId);
   const data = {};
   for (const r of rows) {
     const day = Number(r.date_local.slice(8, 10));
@@ -93,9 +93,9 @@ function monthData(guildId, year, month, tz, symbol = '$') {
  * logged it), the day's totals, and the week around it for context.
  * isoDate: YYYY-MM-DD in tz.
  */
-function dayData(guildId, isoDate, tz, symbol = '$') {
+function dayData(guildId, isoDate, tz, symbol = '$', accountId = null) {
   const dt = DateTime.fromISO(isoDate, { zone: tz });
-  const rows = pnlBetween(guildId, isoDate, isoDate);
+  const rows = pnlBetween(guildId, isoDate, isoDate, accountId);
   const details = entryDetailsFor(rows.map((r) => r.thread_id));
   const trades = rows.map((r) => {
     const d = details[r.thread_id] || {};
@@ -113,7 +113,7 @@ function dayData(guildId, isoDate, tz, symbol = '$') {
   const hasR = counted.some((t) => typeof t.r === 'number' && !Number.isNaN(t.r));
   const best = counted.length ? counted.reduce((a, c) => (c.pnl > a.pnl ? c : a)) : null;
   // the week around it (Mon-Fri), for the strip at the bottom
-  const wk = weekData(guildId, isoDate, tz, symbol);
+  const wk = weekData(guildId, isoDate, tz, symbol, accountId);
   return {
     kind: 'daily', date: isoDate, symbol,
     weekday: dt.setLocale('en').toFormat('cccc'),
@@ -130,11 +130,11 @@ function dayData(guildId, isoDate, tz, symbol = '$') {
  * Every trade in a period, as a list, for /trades.
  * range: 'day' | 'week' (Mon-Sun) | 'month'; anchorISO: a date inside it (YYYY-MM-DD in tz).
  */
-function tradesData(guildId, range, tz, symbol = '$', anchorISO = DateTime.now().setZone(tz).toISODate()) {
+function tradesData(guildId, range, tz, symbol = '$', anchorISO = DateTime.now().setZone(tz).toISODate(), accountId = null) {
   const a = DateTime.fromISO(anchorISO, { zone: tz });
   const start = range === 'month' ? a.startOf('month') : range === 'week' ? a.startOf('week') : a.startOf('day');
   const end = range === 'month' ? a.endOf('month') : range === 'week' ? start.plus({ days: 6 }) : start;
-  const rows = pnlBetween(guildId, start.toISODate(), end.toISODate());
+  const rows = pnlBetween(guildId, start.toISODate(), end.toISODate(), accountId);
   const details = entryDetailsFor(rows.map((r) => r.thread_id));
   const trades = rows.map((r) => {
     const d = details[r.thread_id] || {};

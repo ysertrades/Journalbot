@@ -157,9 +157,18 @@ function floor(ctx, H, W = 1600) {
   ctx.drawImage(grid, 0, 0, W, H);
 }
 
+/** a small tag beside a card's pill naming the account it shows, e.g. "EVAL · 100K · HYPERPROP" */
+function accountChip(ctx, x, y, label) {
+  if (!label) return;
+  const w = measure(ctx, label, 'mono', 13, 400, 2.4) + 32;
+  rr(ctx, x, y, w, 34, 17); ctx.fillStyle = 'rgba(121,131,255,.12)'; ctx.fill();
+  rr(ctx, x + 0.5, y + 0.5, w - 1, 33, 16.5); ctx.strokeStyle = 'rgba(121,131,255,.5)'; ctx.lineWidth = 1; ctx.stroke();
+  text(ctx, label, x + 16, y + 10, { kind: 'mono', size: 13, color: '#7983ff', ls: 2.4 });
+}
+
 /* --------------------------------- header -------------------------------- */
 /** pill, headline with its italic turn, and the total on the right */
-function header(ctx, { kicker, lead, total, label, chip, symbol, empty }) {
+function header(ctx, { kicker, lead, total, label, chip, symbol, empty, account }) {
   const t = OUT[toneOf(total)];
   // the pill: ink tile with a live dot, then the kicker
   const pillY = 46, pillH = 46, kw = measure(ctx, kicker, 'inter', 17, 600, 0.2);
@@ -170,6 +179,7 @@ function header(ctx, { kicker, lead, total, label, chip, symbol, empty }) {
   ctx.fillStyle = empty ? OUT.none.hex : t.hex; ctx.beginPath(); ctx.arc(PAD + 23, pillY + 23, 4.5, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = `rgba(${empty ? OUT.none.rgb : t.rgb},.35)`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(PAD + 23, pillY + 23, 8, 0, Math.PI * 2); ctx.stroke();
   text(ctx, kicker, PAD + 12 + 26 + 12, pillY + 15, { size: 17, weight: 600, color: C.ink2, ls: 0.2 });
+  accountChip(ctx, PAD + pillW + 12, pillY + 6, account);
 
   // the headline: "Week 42," in ink, then the italic turn in grey
   const turn = empty ? 'nothing logged.' : total > 0 ? 'in the green.' : total < 0 ? 'in the red.' : 'dead flat.';
@@ -310,7 +320,7 @@ function renderWeekly(week) {
   const empty = !week.days.some((d) => d.trades > 0) && !(week.weekend && week.weekend.trades);
   header(ctx, {
     kicker: 'Journal · Weekly PnL', lead: week.weekNo ? `Week ${week.weekNo}` : 'This week',
-    total: week.total, label: `WEEK TOTAL · ${week.rangeLabel}`, chip: week.weekend ? week.weekend.pnl : null, symbol: sym, empty,
+    total: week.total, label: `WEEK TOTAL · ${week.rangeLabel}`, chip: week.weekend ? week.weekend.pnl : null, symbol: sym, empty, account: week.accountBadge,
   });
 
   const cw = (INNER_W - 4 * WK.gap) / 5;
@@ -374,7 +384,7 @@ function renderMonthly(month) {
   const data = month.data || {};
   const empty = !Object.values(data).some((d) => d.trades > 0);
   const monthName = first.setLocale('en').toFormat('LLLL');
-  header(ctx, { kicker: 'Journal · Monthly PnL', lead: monthName, total: month.total, label: `MONTH TOTAL · ${month.monthLabel}`, chip: null, symbol: sym, empty });
+  header(ctx, { kicker: 'Journal · Monthly PnL', lead: monthName, total: month.total, label: `MONTH TOTAL · ${month.monthLabel}`, chip: null, symbol: sym, empty, account: month.accountBadge });
 
   const unit = (INNER_W - 7 * GAP) / 8.25, colW = [...Array(7).fill(unit), unit * 1.25];
   const colX = []; { let x = PAD; colW.forEach((w) => { colX.push(x); x += w + GAP; }); }
@@ -500,6 +510,7 @@ function renderDaily(day, asCanvas = false) {
   ctx.fillStyle = t.hex; ctx.beginPath(); ctx.arc(DPAD + 23, 79, 4.5, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = `rgba(${t.rgb},.35)`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(DPAD + 23, 79, 8, 0, Math.PI * 2); ctx.stroke();
   text(ctx, kicker, DPAD + 50, 71, { size: 17, weight: 600, color: C.ink2, ls: 0.2 });
+  accountChip(ctx, DPAD + pw + 12, 62, day.accountBadge);
   text(ctx, day.dateLabel || '', DW - DPAD, 72, { kind: 'mono', size: 15, color: C.grey, align: 'right', ls: 4 });
 
   // "Thursday, a green day."
@@ -700,6 +711,7 @@ function renderTrades(data, page = 0) {
   ctx.strokeStyle = t.hex; ctx.lineWidth = 2; ctx.lineCap = 'round';
   [[63, 12], [69, 8], [75, 10]].forEach(([y, w]) => { ctx.beginPath(); ctx.moveTo(PAD + 17, y); ctx.lineTo(PAD + 17 + w, y); ctx.stroke(); });
   text(ctx, kicker, PAD + 50, 61, { size: 17, weight: 600, color: C.ink2, ls: 0.2 });
+  accountChip(ctx, PAD + pw + 12, 52, data.accountBadge);
   text(ctx, data.label || '', W - PAD, 56, { kind: 'mono', size: 15, color: C.grey, align: 'right', ls: 4 });
 
   // "This week, 12 trades."
@@ -877,6 +889,199 @@ function renderTrades(data, page = 0) {
   return { buffer: canvas.toBuffer('image/png'), page: pg, pages };
 }
 
+/* ------------------------------- ACCOUNT (prop firm dashboard) ------------------------------- */
+/**
+ * One account run as a firm's dashboard would show it, in the studio style:
+ * the balance large, then three gauges (target ring, room above the drawdown
+ * floor, today against the daily limit), the balance line with the floor
+ * trailing under it and the target above, the rule tiles, and the journey
+ * strip (Eval #1 breached, Eval #2 passed, Funded).
+ * view: accountView() plus { badge, title, symbol }.
+ */
+function renderAccount(view) {
+  ensureFonts();
+  const { account: a, state: s } = view, sym = view.symbol || '$';
+  const H = 1120;
+  const canvas = createCanvas(W * SCALE, H * SCALE), ctx = canvas.getContext('2d');
+  ctx.scale(SCALE, SCALE);
+  floor(ctx, H);
+  const breached = a.status === 'breached' || !!s.breach, passed = a.status === 'passed';
+  const tone = breached ? 'loss' : s.profit > 0 ? 'win' : s.profit < 0 ? 'loss' : 'be', t = OUT[tone];
+  const money = (v, o) => formatDollars(v, { symbol: sym, ...o });
+
+  // pill, then the account badge beside it
+  const kicker = 'Journal · Prop account', kw = measure(ctx, kicker, 'inter', 17, 600, 0.2), pw = 12 + 26 + 12 + kw + 22;
+  shadowed(ctx, () => { rr(ctx, PAD, 46, pw, 46, 23); ctx.fillStyle = C.paper; ctx.fill(); }, { blur: 18, y: 8, alpha: 0.12 });
+  rr(ctx, PAD + 0.5, 46.5, pw - 1, 45, 23); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+  rr(ctx, PAD + 10, 56, 26, 26, 8); ctx.fillStyle = C.tile; ctx.fill();
+  ctx.fillStyle = t.hex; ctx.beginPath(); ctx.arc(PAD + 23, 69, 4.5, 0, Math.PI * 2); ctx.fill();
+  text(ctx, kicker, PAD + 50, 61, { size: 17, weight: 600, color: C.ink2, ls: 0.2 });
+  const bdg = view.badge || '', bw = measure(ctx, bdg, 'mono', 13, 400, 2.4) + 32;
+  const phaseTone = a.phase === 'funded' ? OUT.be : a.phase === 'eval' ? { rgb: '121,131,255', hex: '#7983ff' } : OUT.none;
+  rr(ctx, PAD + pw + 12, 52, bw, 34, 17); ctx.fillStyle = `rgba(${phaseTone.rgb},.12)`; ctx.fill();
+  rr(ctx, PAD + pw + 12.5, 52.5, bw - 1, 33, 16.5); ctx.strokeStyle = `rgba(${phaseTone.rgb},.5)`; ctx.lineWidth = 1; ctx.stroke();
+  text(ctx, bdg, PAD + pw + 28, 62, { kind: 'mono', size: 13, color: phaseTone.hex, ls: 2.4 });
+
+  // "100K Hyperprop #2, 52% to funded."
+  const pct = s.progress === null ? null : Math.floor(s.progress * 100);
+  const turn = breached ? 'breached.' : passed ? 'passed.' : s.passReady ? 'ready to fund.'
+    : a.phase === 'eval' && pct !== null ? `${pct}% to funded.` : a.phase === 'funded' ? (s.paid ? `${money(s.paid, { sign: false })} paid out.` : 'funded.') : s.profit > 0 ? 'in the green.' : s.profit < 0 ? 'in the red.' : 'flat.';
+  const lead = `${view.title || a.name},`;
+  // the headline and its italic turn share the room left of the balance, shrinking together
+  const bal = money(s.balance, { sign: false }), vs = shrink(ctx, bal, 520, { size: 96, weight: 800, ls: -4 });
+  const room = INNER_W - measure(ctx, bal, 'inter', vs, 800, -vs * 0.04) - 60;
+  let hs = 74;
+  while (hs > 40 && measure(ctx, lead, 'inter', hs, 800, -hs * 0.045) + 18 + measure(ctx, turn, 'serif', hs * 1.08, 400, -0.5, true) > room) hs -= 2;
+  const lw = text(ctx, lead, PAD, 122 + (74 - hs) * 0.5, { size: hs, weight: 800, ls: -hs * 0.045 });
+  text(ctx, turn, PAD + lw + 18, 122 + (74 - hs) * 0.5 + hs * 0.08, { kind: 'serif', size: hs * 1.08, italic: true, color: C.grey, ls: -0.5 });
+  ctx.fillStyle = `rgba(${t.rgb},.55)`; rr(ctx, PAD + lw + 22, 122 + (74 - hs) * 0.5 + hs + 12, Math.min(measure(ctx, turn, 'serif', hs * 1.08, 400, -0.5, true) - 8, 240), 4, 2); ctx.fill();
+  const sub = [a.phase === 'eval' ? `ATTEMPT ${a.attempt}` : PHASES_SHORT[a.phase], DD_SHORT[s.ddType] && s.dd ? DD_SHORT[s.ddType] : null].filter(Boolean).join(' · ');
+  text(ctx, `BALANCE · ${sub}`, W - PAD, 56, { kind: 'mono', size: 15, color: C.grey, align: 'right', ls: 4 });
+  text(ctx, bal, W - PAD, 84, { size: vs, weight: 800, color: C.ink, align: 'right', ls: -vs * 0.04 });
+  text(ctx, `${money(s.profit)} SINCE ${DateTime.fromISO(a.started_on).setLocale('en').toFormat('LLL d').toUpperCase()}`, W - PAD, 84 + vs + 10, { kind: 'mono', size: 15, color: OUT[s.profit > 0 ? 'win' : s.profit < 0 ? 'loss' : 'none'].deep, align: 'right', ls: 2 });
+  if (s.breach) {   // when and why, in a red tag under the balance
+    const why = `BREACHED ${DateTime.fromISO(s.breach.date).setLocale('en').toFormat('LLL d').toUpperCase()} · ${s.breach.kind === 'daily' ? 'DAILY LOSS LIMIT' : 'MAX DRAWDOWN'}`;
+    const ww = measure(ctx, why, 'mono', 13, 400, 2.4) + 30;
+    rr(ctx, W - PAD - ww, 84 + vs + 40, ww, 32, 16); ctx.fillStyle = `rgba(${OUT.loss.rgb},.14)`; ctx.fill();
+    rr(ctx, W - PAD - ww + 0.5, 84 + vs + 40.5, ww - 1, 31, 15.5); ctx.strokeStyle = `rgba(${OUT.loss.rgb},.55)`; ctx.lineWidth = 1; ctx.stroke();
+    text(ctx, why, W - PAD - ww + 15, 84 + vs + 50, { kind: 'mono', size: 13, color: OUT.loss.deep, ls: 2.4 });
+  }
+
+  // three gauges
+  const gy = 300, gh = 210, gap = 20, gw = (INNER_W - gap * 2) / 3;
+  const gauge = (i, o) => { const x = PAD + i * (gw + gap); glassCard(ctx, x, gy, gw, gh, 28, o, { faint: o === 'none' }); return x; };
+  const lbl = (x, s1) => text(ctx, s1, x + 28, gy + 26, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.5)', ls: 3 });
+  const off = (x, why) => { text(ctx, 'OFF', x + 28, gy + 70, { size: 48, weight: 800, color: 'rgba(255,255,255,.25)' }); text(ctx, why, x + 28, gy + 140, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.35)', ls: 1 }); };
+  // 1. target ring, or payouts on a funded account
+  {
+    const showPay = a.phase === 'funded' && s.target === null;
+    const x = gauge(0, showPay ? (s.paid ? 'be' : 'none') : s.target === null ? 'none' : s.targetHit ? 'win' : 'none');
+    lbl(x, showPay ? 'PAYOUTS' : 'PROFIT TARGET');
+    if (showPay) {
+      text(ctx, money(s.paid, { sign: false }), x + 28, gy + 62, { size: 48, weight: 800, color: s.paid ? OUT.be.hex : 'rgba(255,255,255,.3)', ls: -1.5 });
+      text(ctx, `${view.payouts.length} PAYOUT${view.payouts.length === 1 ? '' : 'S'}${s.yourShare !== null ? ` · YOUR ${a.split_pct}% ${money(s.yourShare, { sign: false })}` : ''}`, x + 28, gy + 130, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.5)', ls: 1 });
+      text(ctx, `${money(Math.max(0, s.profit), { sign: false })} PROFIT ON THE ACCOUNT`, x + 28, gy + 156, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.35)', ls: 1 });
+    } else if (s.target === null) off(x, 'no profit target on this account');
+    else {
+      const cx = x + 28 + 62, cy = gy + 122, R = 54, p = s.progress;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 12; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+      if (p > 0) {   // a full turn is drawn as a circle: an arc whose ends meet draws nothing
+        ctx.strokeStyle = OUT.win.hex; ctx.beginPath();
+        if (p >= 0.999) ctx.arc(cx, cy, R, 0, Math.PI * 2); else ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p);
+        ctx.stroke();
+      }
+      text(ctx, `${Math.floor(p * 100)}%`, cx, cy - 13, { size: 26, weight: 800, color: '#ffffff', align: 'center', ls: -0.5 });
+      const tx = cx + R + 30;
+      text(ctx, money(Math.max(0, s.profit), { sign: false }), tx, gy + 74, { size: 38, weight: 800, color: s.profit > 0 ? OUT.win.hex : 'rgba(255,255,255,.5)', ls: -1.2 });
+      text(ctx, `OF ${money(s.target, { sign: false })}`, tx, gy + 122, { kind: 'mono', size: 14, color: 'rgba(255,255,255,.55)', ls: 2 });
+      text(ctx, s.targetHit ? 'TARGET HIT' : `${money(s.target - s.profit, { sign: false })} TO GO`, tx, gy + 148, { kind: 'mono', size: 13, color: s.targetHit ? OUT.win.hex : 'rgba(255,255,255,.4)', ls: 2 });
+    }
+  }
+  // 2. room above the drawdown floor: a fuel gauge
+  {
+    const used = s.ddUsed, o = s.dd === null ? 'none' : breached && s.breach?.kind === 'drawdown' ? 'loss' : used > 0.8 ? 'loss' : used > 0.5 ? 'be' : 'win';
+    const x = gauge(1, o);
+    lbl(x, 'ROOM TO THE FLOOR');
+    if (s.dd === null) off(x, 'no drawdown limit on this account');
+    else {
+      const room = Math.max(0, s.room);
+      text(ctx, money(room, { sign: false }), x + 28, gy + 62, { size: 48, weight: 800, color: OUT[o].hex, ls: -1.5 });
+      const bx = x + 28, bwid = gw - 56, by = gy + 132, segs = 20, sw = (bwid - (segs - 1) * 4) / segs, lit = Math.round((1 - used) * segs);
+      for (let k = 0; k < segs; k++) { rr(ctx, bx + k * (sw + 4), by, sw, 12, 3); ctx.fillStyle = k < lit ? OUT[o].hex : 'rgba(255,255,255,.08)'; ctx.fill(); }
+      const locked = s.ddType !== 'static' && s.floor >= s.start - 1e-9;
+      text(ctx, `FLOOR ${money(s.floor, { sign: false })} · ${locked ? 'LOCKED AT START' : DD_SHORT[s.ddType]}`, x + 28, gy + 160, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.45)', ls: 1 });
+    }
+  }
+  // 3. today against the daily loss limit
+  {
+    const used = s.dailyUsed, o = s.daily === null ? 'none' : breached && s.breach?.kind === 'daily' ? 'loss' : used > 0.8 ? 'loss' : used > 0.5 ? 'be' : s.todayPnl > 0 ? 'win' : 'none';
+    const x = gauge(2, o);
+    lbl(x, 'TODAY');
+    text(ctx, money(s.todayPnl), x + 28, gy + 62, { size: 48, weight: 800, color: s.todayPnl > 0 ? OUT.win.hex : s.todayPnl < 0 ? OUT.loss.hex : 'rgba(255,255,255,.4)', ls: -1.5 });
+    if (s.daily === null) text(ctx, 'NO DAILY LOSS LIMIT', x + 28, gy + 140, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.35)', ls: 1 });
+    else {
+      const bx = x + 28, bwid = gw - 56, by = gy + 132;
+      rr(ctx, bx, by, bwid, 12, 6); ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fill();
+      if (used > 0) { rr(ctx, bx, by, Math.max(12, bwid * used), 12, 6); ctx.fillStyle = OUT[used > 0.8 ? 'loss' : used > 0.5 ? 'be' : 'loss'].hex; ctx.fill(); }
+      text(ctx, `${money(Math.max(0, s.dailyRoom), { sign: false })} LEFT OF ${money(s.daily, { sign: false })} DAILY LIMIT`, x + 28, gy + 160, { kind: 'mono', size: 13, color: 'rgba(255,255,255,.45)', ls: 1 });
+    }
+  }
+
+  // the balance line, the floor trailing under it, the target above
+  const cy0 = 560, ch = 230, cx0 = PAD, cx1 = W - PAD - 150;
+  text(ctx, 'BALANCE', PAD, cy0, { kind: 'mono', size: 14, color: C.grey, ls: 4 });
+  const pts = s.series, targetBal = s.target !== null ? s.start + s.target : null;
+  const vals = [...pts.map((p) => p.balance), ...pts.map((p) => p.floor).filter((v) => v !== null), ...(targetBal !== null ? [targetBal] : []), s.start];
+  const lo = Math.min(...vals), hi = Math.max(...vals), rng = hi - lo || 1, top = cy0 + 40, base = cy0 + ch;
+  const Y = (v) => base - ((v - lo) / rng) * (base - top), X = (i) => cx0 + (i * (cx1 - cx0)) / Math.max(1, pts.length - 1);
+  const guide = (v, color, name) => {
+    ctx.save(); ctx.setLineDash([5, 8]); ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(cx0, Y(v)); ctx.lineTo(cx1, Y(v)); ctx.stroke(); ctx.restore();
+    text(ctx, name, cx1 + 14, Y(v) - 8, { kind: 'mono', size: 12, color, ls: 1.6 });
+    text(ctx, money(v, { sign: false }), cx1 + 14, Y(v) + 8, { kind: 'mono', size: 12, color: C.grey });
+  };
+  if (targetBal !== null) guide(targetBal, OUT.win.deep, 'TARGET');
+  if (!pts.some((p) => p.floor !== null)) guide(s.start, C.grey, 'START');
+  if (pts.some((p) => p.floor !== null)) {   // the floor as a step line: it only ever moves up
+    ctx.save(); ctx.strokeStyle = OUT.loss.deep; ctx.lineWidth = 2; ctx.setLineDash([2, 6]); ctx.lineCap = 'round'; ctx.beginPath();
+    pts.forEach((p, i) => { const y = Y(p.floor); if (!i) ctx.moveTo(X(i), y); else { ctx.lineTo(X(i), Y(pts[i - 1].floor)); ctx.lineTo(X(i), y); } });
+    ctx.stroke(); ctx.restore();
+    const lf = pts[pts.length - 1].floor;
+    text(ctx, 'FLOOR', cx1 + 14, Y(lf) - 8, { kind: 'mono', size: 12, color: OUT.loss.deep, ls: 1.6 });
+    text(ctx, money(lf, { sign: false }), cx1 + 14, Y(lf) + 8, { kind: 'mono', size: 12, color: C.grey });
+  }
+  if (pts.length > 1) {
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    shadowed(ctx, () => { ctx.strokeStyle = C.ink; ctx.lineWidth = 3.5; ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(X(i), Y(p.balance)) : ctx.moveTo(X(i), Y(p.balance)))); ctx.stroke(); }, { blur: 10, y: 6, alpha: 0.18 });
+    if (s.breach) {   // the trade that broke the rules, marked where it happened
+      const bi = pts.findIndex((p) => p.key === s.breach.key);
+      if (bi > 0) { ctx.strokeStyle = OUT.loss.hex; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X(bi), Y(pts[bi].balance), 11, 0, Math.PI * 2); ctx.stroke(); text(ctx, 'BREACH', X(bi), Y(pts[bi].balance) - 34, { kind: 'mono', size: 12, color: OUT.loss.deep, align: 'center', ls: 2 }); }
+    }
+    const e = pts.length - 1;
+    ctx.fillStyle = C.paper; ctx.beginPath(); ctx.arc(X(e), Y(pts[e].balance), 9, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.stroke();
+  } else text(ctx, 'No trades on this account yet', PAD, cy0 + 110, { kind: 'serif', size: 40, italic: true, color: C.grey });
+
+  // the rules as tiles
+  const tiles = [
+    { k: 'TRADING DAYS', v: s.minDays ? `${s.days} / ${s.minDays}` : String(s.days), tone: s.minDays ? (s.daysOk ? 'good' : null) : null },
+    { k: 'CONSISTENCY', v: s.consistencyPct ? (s.consistencyShare === null ? '—' : `${Math.round(s.consistencyShare)}%`) : 'OFF', tone: s.consistencyPct && s.consistencyShare !== null ? (s.consistencyOk ? 'good' : 'bad') : null },
+    { k: 'BEST DAY', v: s.bestDay ? money(s.bestDay.pnl) : '—', tone: s.bestDay && s.bestDay.pnl > 0 ? 'good' : s.bestDay && s.bestDay.pnl < 0 ? 'bad' : null },
+    { k: 'TRADES', v: String(s.trades) },
+    a.phase === 'funded' ? { k: 'PROFIT SPLIT', v: a.split_pct ? `${a.split_pct}%` : '—' } : { k: 'DRAWDOWN', v: s.dd === null ? 'OFF' : money(s.dd, { sign: false }) },
+  ];
+  stats(ctx, 836, tiles);
+  // consistency rule text under its tile
+  if (s.consistencyPct) {
+    const cw = (INNER_W - 14 * 4) / 5;
+    text(ctx, `BEST DAY ≤ ${s.consistencyPct}% OF PROFIT`.replace('≤', '<='), PAD + (cw + 14) + 22, 836 + 100, { kind: 'mono', size: 11, color: C.grey, ls: 1.4 });
+  }
+
+  // the journey: every run of this account, oldest first
+  const chain = view.chain || [a];
+  let jx = PAD; const jy = 978;
+  text(ctx, 'JOURNEY', jx, jy - 4, { kind: 'mono', size: 12, color: C.grey, ls: 3 });
+  jx += 110;
+  chain.slice(-5).forEach((r, i) => {
+    const name = `${r.phase === 'eval' ? `EVAL #${r.attempt}` : PHASES_SHORT[r.phase]}`;
+    const st = r.id === a.id && s.breach && r.status === 'active' ? 'breached' : r.status;
+    const word = st === 'breached' ? 'BREACHED' : st === 'passed' ? 'PASSED' : st === 'archived' ? 'ARCHIVED' : 'LIVE';
+    const col = st === 'breached' ? OUT.loss : st === 'passed' ? OUT.win : st === 'archived' ? OUT.none : phaseTone;
+    if (i) { ctx.fillStyle = C.line; ctx.fillRect(jx - 26, jy + 3, 18, 2); }
+    const w1 = measure(ctx, name, 'mono', 13, 400, 2), w2 = measure(ctx, word, 'mono', 11, 400, 2), cw = 18 + 12 + w1 + 10 + w2 + 18;
+    rr(ctx, jx, jy - 14, cw, 36, 18); ctx.fillStyle = r.id === a.id ? `rgba(${col.rgb},.14)` : C.paper; ctx.fill();
+    rr(ctx, jx + 0.5, jy - 13.5, cw - 1, 35, 17.5); ctx.strokeStyle = r.id === a.id ? `rgba(${col.rgb},.6)` : C.line; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = col.hex; ctx.beginPath(); ctx.arc(jx + 22, jy + 4, 5, 0, Math.PI * 2);
+    if (st === 'active') { ctx.lineWidth = 2; ctx.strokeStyle = col.hex; ctx.stroke(); } else ctx.fill();
+    text(ctx, name, jx + 36, jy - 3, { kind: 'mono', size: 13, color: C.ink, ls: 2 });
+    text(ctx, word, jx + 36 + w1 + 10, jy - 1, { kind: 'mono', size: 11, color: col.hex === '#94a3b8' ? C.grey : (C.dark ? col.hex : col.deep || col.hex), ls: 2 });
+    jx += cw + 34;
+  });
+  footer(ctx, H, undefined, undefined, `${String(view.badge || '').replace(/ · /g, ' · ')}`.slice(0, 48) || undefined);
+  return canvas.toBuffer('image/png');
+}
+const PHASES_SHORT = { eval: 'EVAL', funded: 'FUNDED', personal: 'PERSONAL' };
+const DD_SHORT = { trailing: 'TRAILING', eod: 'EOD TRAILING', static: 'STATIC' };
+
 /**
  * The Appearance page's preview: the same day drawn in Studio and in Night,
  * side by side on a floor that is half day, half night, with the one in use
@@ -918,5 +1123,6 @@ module.exports = {
   renderMonthly: (month, { theme } = {}) => withTheme(theme, toneFor(month.total, !Object.values(month.data || {}).some((d) => d.trades > 0)), () => renderMonthly(month)),
   renderDaily: (day, { theme } = {}) => withTheme(theme, toneFor(day.total, !(day.trades || []).some((t) => t.outcome !== 'missed')), () => renderDaily(day)),
   renderTrades: (data, page = 0, { theme } = {}) => withTheme(theme, toneFor(data.net, !data.count), () => renderTrades(data, page)),
+  renderAccount: (view, { theme } = {}) => withTheme(theme, view.state?.breach || view.account?.status === 'breached' ? 'loss' : toneFor(view.state?.profit || 0, !view.state?.trades), () => renderAccount(view)),
   renderThemeSwatch, tradePages, ensureFonts, THEMES,
 };
