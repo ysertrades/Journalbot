@@ -170,20 +170,43 @@
     if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
     await new Promise((r) => setTimeout(r, 180));
     if (seq !== routeSeq) return;
-    $('#page-kicker').textContent = `${page.k} · ${S.guild.name}`; $('#page-title').innerHTML = esc(page.t); $('#top-tools').innerHTML = '';
-    // a skeleton only when the data is slow, so a quick page never flashes one
+    // the header keeps the old page's title until the new page is ready, then crossfades to its real one:
+    // pages write their title and tools into this staging area while they load
+    S.routing = seq; S.pending = { title: null, tools: document.createElement('div') };
+    // a marker the page replaces the moment it draws anything; the skeleton only shows while it is still here
+    view.innerHTML = '<i data-wait hidden></i>';
     const sk = setTimeout(() => {
-      if (seq !== routeSeq || view.dataset.ready === String(seq)) return;
-      view.innerHTML = '<div class="grid g-main"><div class="sk" style="height:320px"></div><div class="sk" style="height:320px"></div></div><div class="kpis">' + '<div class="sk" style="height:86px"></div>'.repeat(6) + '</div>';
+      if (seq !== routeSeq || !view.querySelector('[data-wait]')) return;   // the page has drawn: never paint over it
+      view.innerHTML = '<i data-wait hidden></i><div class="grid g-main"><div class="sk" style="height:320px"></div><div class="sk" style="height:320px"></div></div><div class="kpis">' + '<div class="sk" style="height:86px"></div>'.repeat(6) + '</div>';
+      $('#page-title').innerHTML = '<span class="title-sk"></span>';   // a shimmering title while the data is slow
       view.classList.remove('leaving');
     }, 260);
     try { await page.run(view, new URLSearchParams(qs || ''), seq); }
     catch (e) { if (seq === routeSeq) view.innerHTML = `<div class="card empty"><span class="em">Something went sideways</span><span>${esc(e.message)}</span><button class="btn" id="retry">Try again</button></div>`; $('#retry')?.addEventListener('click', route); }
     clearTimeout(sk);
     if (seq !== routeSeq) return;
-    view.dataset.ready = String(seq);
+    S.routing = 0;
+    swapHeader(`${page.k} · ${S.guild.name}`, S.pending.title || esc(page.t), S.pending.tools);
     enter(view);
   }
+  /** the header's title, kicker and tools slide out and the new ones slide in, together with the page */
+  function swapHeader(kicker, title, tools) {
+    const crumbs = $('.crumbs'), box = $('#top-tools');
+    crumbs.classList.add('swap'); box.classList.add('swap');
+    setTimeout(() => {
+      $('#page-kicker').textContent = kicker; $('#page-title').innerHTML = title;
+      box.innerHTML = ''; if (tools) box.append(...tools.childNodes);
+      crumbs.classList.remove('swap'); box.classList.remove('swap');
+    }, 170);
+  }
+  /** a page sets its real title; while routing it waits for the swap, afterwards it crossfades in place */
+  function setTitle(html) {
+    if (S.routing) { S.pending.title = html; return; }
+    const t = $('#page-title'); if (t.innerHTML === html) return;
+    t.classList.add('swap'); setTimeout(() => { t.innerHTML = html; t.classList.remove('swap'); }, 160);
+  }
+  /** where a page puts its header tools: staged while routing, live afterwards */
+  const toolsEl = () => (S.routing ? S.pending.tools : $('#top-tools'));
   /** the new page rises in piece by piece, then lets go of the held height */
   function enter(view) {
     [...view.children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 8)));
@@ -200,12 +223,12 @@
 
   /* ---------- overview ---------- */
   async function overview(view, qs, seq) {
-    const tools = $('#top-tools');
+    const tools = toolsEl();
     tools.appendChild(rangeSeg(S.range, (r) => { S.range = r; store.set('jb_range', r); route(); }));
     const d = await api(g(`overview?range=${S.range}`)); if (seq !== routeSeq) return;
     S.currency = d.currency || '$';
     const st = d.stats, word = RANGE_WORD[S.range];
-    $('#page-title').innerHTML = `${esc(word)}, <em>${turn(st.net, st.count)}</em>`;
+    setTitle(`${esc(word)}, <em>${turn(st.net, st.count)}</em>`);
     const pf = st.profitFactor === 'inf' ? '∞' : st.profitFactor ?? '—';
     view.innerHTML = `
       <div class="grid g-main">
@@ -283,8 +306,8 @@
     S.currency = d.currency || '$';
     const [y, mo] = d.month.split('-').map(Number);
     const prev = new Date(y, mo - 2, 1), next = new Date(y, mo, 1), fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
-    $('#page-title').innerHTML = `${esc(new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }))}, <em>${turn(d.total, d.tradedDays)}</em>`;
-    $('#top-tools').innerHTML = `<a class="btn icon" href="#/calendar?m=${fmt(prev)}" aria-label="Previous month">‹</a><a class="btn sm" href="#/calendar">This month</a><a class="btn icon" href="#/calendar?m=${fmt(next)}" aria-label="Next month">›</a>`;
+    setTitle(`${esc(new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }))}, <em>${turn(d.total, d.tradedDays)}</em>`);
+    toolsEl().innerHTML = `<a class="btn icon" href="#/calendar?m=${fmt(prev)}" aria-label="Previous month">‹</a><a class="btn sm" href="#/calendar">This month</a><a class="btn icon" href="#/calendar?m=${fmt(next)}" aria-label="Next month">›</a>`;
     const by = {}; for (const t of d.trades) (by[t.date] ||= []).push(t);
     const first = new Date(y, mo - 1, 1), lead = (first.getDay() + 6) % 7, dim = new Date(y, mo, 0).getDate();
     const cells = [];
@@ -339,9 +362,10 @@
       const p = new URLSearchParams({ range: st.range, page: st.page }); for (const k of ['from', 'to', 'outcome', 'symbol', 'lens', 'q']) if (st[k]) p.set(k, st[k]);
       const d = await api(g(`trades?${p}`)); if (seq !== routeSeq) return;
       S.currency = d.currency || '$';
-      const symSel = $('#f-sym'); symSel.innerHTML = `<option value="">All symbols</option>${d.symbols.map((s) => `<option ${s === st.symbol ? 'selected' : ''}>${esc(s)}</option>`).join('')}`;
+      const symSel = $('#f-sym'); if (!symSel || !$('#tbl-card')) return;   // the page was left or redrawn meanwhile
+      symSel.innerHTML = `<option value="">All symbols</option>${d.symbols.map((s) => `<option ${s === st.symbol ? 'selected' : ''}>${esc(s)}</option>`).join('')}`;
       const x = d.stats;
-      $('#page-title').innerHTML = `${d.total} trade${d.total === 1 ? '' : 's'}, <em>${x.count ? money(x.net) : 'none yet'}</em>`;
+      setTitle(`${d.total} trade${d.total === 1 ? '' : 's'}, <em>${x.count ? money(x.net) : 'none yet'}</em>`);
       $('#tbl-card').innerHTML = !d.trades.length ? '<div class="empty"><span class="em">Nothing matches</span><span>Loosen a filter or search for something else.</span></div>' : `
         <div class="card-h"><span class="kicker">${x.winRate !== null ? `${x.winRate}% win rate · ` : ''}PF ${x.profitFactor === 'inf' ? '∞' : x.profitFactor ?? '—'} · expectancy ${money(x.expectancy)}</span><span class="kicker">page ${d.page + 1} of ${d.pages}</span></div>
         <div class="tcards">${d.trades.map((t) => `<div class="tc" data-key="${esc(t.key)}" style="--tab:${OUT[t.outcome].c}">
@@ -465,11 +489,11 @@
   /* ---------- insights ---------- */
   async function insights(view, qs, seq) {
     const r = qs.get('range') || 'd90';
-    $('#top-tools').appendChild(rangeSeg(r, (x) => { location.hash = `#/insights?range=${x}`; }, RANGES.filter(([k]) => k !== 'day')));
+    toolsEl().appendChild(rangeSeg(r, (x) => { location.hash = `#/insights?range=${x}`; }, RANGES.filter(([k]) => k !== 'day')));
     const d = await api(g(`insights?range=${r}`)); if (seq !== routeSeq) return;
     S.currency = d.currency || '$';
     const i = d.insights, st = d.stats;
-    $('#page-title').innerHTML = `Where the edge is, <em>${esc(RANGE_WORD[r].toLowerCase())}.</em>`;
+    setTitle(`Where the edge is, <em>${esc(RANGE_WORD[r].toLowerCase())}.</em>`);
     const card = (t, id, sub = '') => `<section class="card"><div class="card-h"><h3>${t}</h3><span class="kicker">${sub}</span></div><div id="${id}"></div></section>`;
     view.innerHTML = `
       <div class="kpis">${kpi('Net', money(st.net), `${st.count} trades`, tone(st.net))}${kpi('Win rate', st.winRate !== null ? `${st.winRate}%` : '—', `${st.w}W · ${st.l}L`)}${kpi('Avg R', st.avgR !== null ? `${st.avgR > 0 ? '+' : ''}${st.avgR}R` : '—', st.rSum !== null ? `${st.rSum}R total` : 'log R to see it')}${kpi('Held on wins', i.hold.win !== null ? `${i.hold.win}m` : '—', i.hold.n ? `on losses ${i.hold.loss ?? '—'}m` : 'from imports', '')}${kpi('Plan followed', i.discipline.tracked ? `${Math.round((100 * i.discipline.followed) / i.discipline.tracked)}%` : '—', i.discipline.tracked ? `${money(i.discipline.pnlFollowed)} when followed` : 'answer "followed plan?"', i.discipline.tracked ? 'win' : '')}${kpi('Broke the plan', i.discipline.tracked ? money(i.discipline.pnlBroke) : '—', 'what it cost', i.discipline.pnlBroke < 0 ? 'loss' : '')}</div>
@@ -489,7 +513,7 @@
 
   /* ---------- log a trade ---------- */
   async function logTrade(view) {
-    $('#page-title').innerHTML = 'Log a trade, <em>while it\'s fresh.</em>';
+    setTitle('Log a trade, <em>while it\'s fresh.</em>');
     let outcome = 'win', image = null;
     view.innerHTML = `<div class="grid g-main"><section class="card"><form class="form" id="lg">
       <div class="field"><span>Outcome</span><div class="outcomes">${Object.entries(OUT).map(([k, o]) => `<button type="button" class="oc ${k === 'win' ? 'on' : ''}" data-o="${k}" style="--c:${o.c};--ca:${o.a}">${o.e} ${o.label}<small>${k === 'missed' ? 'not counted' : k === 'be' ? 'about flat' : k === 'win' ? 'green' : 'red'}</small></button>`).join('')}</div></div>
@@ -531,7 +555,7 @@
 
   /* ---------- import ---------- */
   async function importCsv(view) {
-    $('#page-title').innerHTML = 'Import trades, <em>never twice.</em>';
+    setTitle('Import trades, <em>never twice.</em>');
     view.innerHTML = `<div class="grid g-main"><section class="card"><div class="drop" id="csv-drop" style="min-height:220px"><span class="big">Drop your trade history</span><span>A .csv from Hyperprop, Tradovate, TopstepX or any sheet with a symbol and a PnL · up to 2 MB</span></div><input type="file" id="csv-file" accept=".csv,.txt,.tsv,text/csv" hidden>
       <label class="field" style="margin-top:14px"><span>Label these trades (optional)</span><input class="input" id="csv-tag" placeholder="Hyperprop · eval 100K" maxlength="60"></label></section>
       <section class="card"><div class="card-h"><h3>How matching works</h3></div><div class="list">
@@ -582,7 +606,7 @@
 
   /* ---------- cards ---------- */
   async function cards(view) {
-    $('#page-title').innerHTML = 'Cards, <em>ready to post.</em>';
+    setTitle('Cards, <em>ready to post.</em>');
     const today = (await api(g('settings')).catch(() => null))?.session?.today || new Date().toISOString().slice(0, 10);   // the trading day, not the browser's
     const st = { kind: 'day', date: today, theme: '', range: 'week' };
     view.innerHTML = `<div class="grid g-main"><section class="card"><div class="cards-preview"><img id="cp" alt="Card preview"></div></section>
@@ -629,7 +653,7 @@
   async function settings(view, qs, seq) {
     const tab = qs.get('tab') || 'general';
     const d = await api(g('settings')); if (seq !== routeSeq) return;
-    $('#page-title').innerHTML = 'Control panel, <em>no slash commands.</em>';
+    setTitle('Control panel, <em>no slash commands.</em>');
     const T = [['general', 'General'], ['forums', 'Forums'], ['access', 'Access'], ['reports', 'Reports'], ['day', 'Trading day'], ['look', 'Appearance'], ['tools', 'Maintenance'], ['embed', 'Embed & hosting']];
     const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Istanbul', 'Africa/Casablanca', 'Africa/Cairo', 'Africa/Lagos', 'Asia/Dubai', 'Asia/Riyadh', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Hong_Kong', 'Asia/Tokyo', 'Australia/Sydney', 'UTC'];
     const s = d.settings, opt = (list, cur, none = '— none —') => `<option value="">${none}</option>${list.map((c) => `<option value="${c.id}" ${c.id === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}`;

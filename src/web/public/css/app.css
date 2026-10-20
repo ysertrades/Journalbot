@@ -369,3 +369,9 @@ textarea.input { height: auto; min-height: 84px; padding: 11px 13px; resize: ver
 .who-list { position: absolute; left: 0; right: 0; top: 100%; z-index: 10; margin-top: 6px; padding: 6px; border-radius: 14px; background: var(--panel2); box-shadow: inset 0 0 0 1px var(--line2), 0 20px 40px -20px #000; animation: pop .25s var(--ease); max-height: 300px; overflow: auto; }
 .who-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 10px; background: none; color: var(--ink); font: 600 14px var(--sans); cursor: pointer; text-align: left; }
 .who-list button:hover { background: var(--panel3); } .who-list img { border-radius: 50%; } .who-list small { color: var(--grey); font: 400 12px var(--mono); }
+
+/* ── the header changes with the page: out softly upward, the real title in from below ── */
+.crumbs, #top-tools, #page-title { transition: opacity .2s var(--ease), transform .35s var(--ease), filter .25s var(--ease); }
+.crumbs.swap, #top-tools.swap, #page-title.swap { opacity: 0; transform: translateY(-8px); filter: blur(4px); transition-duration: .16s; }
+.title-sk { display: inline-block; width: min(320px, 60vw); height: .8em; border-radius: 12px; background: var(--panel2); position: relative; overflow: hidden; vertical-align: middle; }
+.title-sk::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .06), transparent); transform: translateX(-100%); animation: shim 1.3s infinite; }
