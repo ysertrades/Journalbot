@@ -220,6 +220,7 @@
     if (stamp === live.stamp) return;
     live.stamp = stamp;
     reads.clear(); forgetCards();
+    window.JBIcon?.arrived();   // the tab icon replays the open, or counts it while you are away
     live.dirty = true; liveRefresh();
   }
   /** redraw the open tab with the new numbers, in place: no fade, no scroll, new trades glow as they land */
@@ -351,6 +352,7 @@
     const st = d.stats, word = RANGE_WORD[S.range];
     setTitle(`${esc(word)}, <em>${turn(st.net, st.count)}</em>`);
     const pf = st.profitFactor === 'inf' ? '∞' : st.profitFactor ?? '—';
+    window.JBIcon?.tone(d.todayStats.count ? tone(d.todayStats.net) : 'flat');   // the tab icon's dot: today, up or down
     view.innerHTML = `
       <div class="grid g-main">
         <section class="card tabbed" style="--tab:var(--${st.count ? tone(st.net) : 'grey'})">

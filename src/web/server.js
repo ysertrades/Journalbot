@@ -50,7 +50,8 @@ const VERSION = Date.now().toString(36);
 function file(res, p, { cache = 'public, max-age=86400' } = {}) {
   fs.readFile(p, (err, buf) => {
     if (err) return send(res, 404, 'Not found');
-    if (p.endsWith('.html')) buf = Buffer.from(buf.toString('utf8').replace(/__V__/g, VERSION));
+    // link previews (Discord, X, iMessage) need the banner's full address: the site's own, from PUBLIC_BASE_URL
+    if (p.endsWith('.html')) buf = Buffer.from(buf.toString('utf8').replace(/__V__/g, VERSION).replace(/__ORIGIN__/g, (auth.config().baseUrl || '').replace(/\/+$/, '')));
     send(res, 200, buf, { 'content-type': TYPES[path.extname(p).toLowerCase()] || 'application/octet-stream', 'cache-control': cache });
   });
 }

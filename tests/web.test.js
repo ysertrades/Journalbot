@@ -64,6 +64,8 @@ test('access follows the journal rules: manage, allowed users, owners; the bot m
 test('pages, headers, static files: the site is framed only where allowed, nothing climbs out of public/', async () => {
   const home = await call('GET', '/');
   assert.equal(home.status, 200); assert.match(home.raw.toString(), /Every trade,/); assert.ok(!home.raw.toString().includes('__V__'));
+  assert.match(home.raw.toString(), /<meta property="og:image" content="https:\/\/journal\.example\.com\/img\/og\.png">/); assert.ok(!home.raw.toString().includes('__ORIGIN__'));   // link previews need the full address
+  assert.equal((await call('GET', '/img/og.png')).headers['content-type'], 'image/png');
   assert.match(home.headers['content-security-policy'], /frame-ancestors 'none'/); assert.equal(home.headers['x-frame-options'], 'DENY');
   process.env.PANEL_FRAME_ANCESTORS = 'https://whop.com https://*.whop.com';
   const app = await call('GET', '/experiences/exp_123');
