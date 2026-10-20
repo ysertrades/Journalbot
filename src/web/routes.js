@@ -23,6 +23,7 @@ const INVITE_PERMS = (1n << 10n | 1n << 11n | 1n << 14n | 1n << 15n | 1n << 16n 
 
 module.exports = function routes(client, { json, fail, readBody, limited }) {
   const jobs = new Map();   // CSV imports and re-date runs, polled by the page
+  const cardCache = new Map();   // drawn PNGs by request + journal stamp
 
   function picture(body) {
     if (!body.image) return { image: null };
@@ -59,7 +60,7 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
     return { fields: f, errors };
   }
 
-  async function guildCtx(req, res, gid, { write = false, manage = false } = {}) {
+  async function guildCtx(req, res, gid, { write = false, manage = false, panel = false } = {}) {
     const session = auth.sessionFor(req);
     if (!session) { fail(res, 401, 'signed_out'); return null; }
     if (!SNOW.test(gid)) { fail(res, 404, 'no_server'); return null; }
@@ -68,7 +69,8 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
     const access = auth.accessTo(session, gid, client, settings);
     if (!guild || !access) { fail(res, 403, 'no_access', 'You can’t open this server’s journal.'); return null; }
     if (manage && !access.manage) { fail(res, 403, 'manage_only', 'Changing settings needs Manage Server.'); return null; }
-    if (!manage && !access.journal) { fail(res, 403, 'no_access', 'This server only lets selected people use the journal.'); return null; }
+    // panel: the control panel's own reads, open to Manage Server even when the journal is limited to other people
+    if (!manage && !access.journal && !(panel && access.manage)) { fail(res, 403, 'no_access', 'This server only lets selected people use the journal.'); return null; }
     if (write || manage) {
       if (req.method === 'GET') { fail(res, 405, 'method'); return null; }
       if (!auth.csrfValid(session, req.headers['x-csrf'])) { fail(res, 403, 'csrf', 'Reload the page and try again.'); return null; }
@@ -145,6 +147,10 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
     }
     if (area === 'card' && req.method === 'GET') {   // any card as a PNG, in either theme
       const ctx = await guildCtx(req, res, gid); if (!ctx) return;
+      // drawn cards are kept until a trade or setting changes, so switching between them is instant
+      const key = `${gid}|${a1}|${q.get('date')}|${q.get('month')}|${q.get('theme')}|${q.get('range')}|${q.get('page')}|${db.journalStamp(gid)}`;
+      const hit = cardCache.get(key);
+      if (hit) { res.writeHead(200, { 'content-type': 'image/png', 'content-length': hit.buf.length, 'cache-control': 'private, max-age=60', 'content-disposition': `inline; filename="${hit.name}"`, 'x-content-type-options': 'nosniff' }); return res.end(hit.buf); }
       const r = require('../lib/reports'), s = { ...ctx.settings, theme: ['light', 'dark'].includes(q.get('theme')) ? q.get('theme') : ctx.settings.theme };
       const today = todayFor(ctx.settings), d = DATE.test(q.get('date') || '') ? q.get('date') : today;
       let buf, name;
@@ -157,7 +163,9 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
         const img = renderTrades(tradesData(gid, range, s.timezone, s.currency, d, today), Number(q.get('page')) || 0, { theme: resolveTheme(s) });
         buf = img.buffer; name = `trades-${range}-${d}.png`;
       } else return fail(res, 404, 'no_card');
-      res.writeHead(200, { 'content-type': 'image/png', 'content-length': buf.length, 'cache-control': 'no-store', 'content-disposition': `inline; filename="${name}"`, 'x-content-type-options': 'nosniff' });
+      cardCache.set(key, { buf, name });
+      if (cardCache.size > 80) cardCache.delete(cardCache.keys().next().value);   // the oldest goes first
+      res.writeHead(200, { 'content-type': 'image/png', 'content-length': buf.length, 'cache-control': 'private, max-age=60', 'content-disposition': `inline; filename="${name}"`, 'x-content-type-options': 'nosniff' });
       return res.end(buf);
     }
 
@@ -236,7 +244,7 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
 
     /* ---------- the control panel (Manage Server) ---------- */
     if (area === 'settings' && req.method === 'GET') {
-      const ctx = await guildCtx(req, res, gid); if (!ctx) return;
+      const ctx = await guildCtx(req, res, gid, { panel: true }); if (!ctx) return;
       return json(res, 200, { ...data.settingsView(ctx.guild, ctx.settings), manage: ctx.access.manage });
     }
     if (area === 'settings' && req.method === 'PATCH') {
@@ -269,10 +277,70 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
         }
         patch.outcome_forums = next; patch.outcome_threads = threads;
       }
+      if ('outcome_threads' in b) {   // an existing post per outcome: trades are added inside it instead of a new post each time
+        const threads = { ...(patch.outcome_threads || s.outcome_threads) }, forums = { ...(patch.outcome_forums || s.outcome_forums) };
+        for (const o of Object.keys(OUTCOMES)) if (o in (b.outcome_threads || {})) {
+          const v = b.outcome_threads[o];
+          if (!v) { threads[o] = null; continue; }
+          const th = SNOW.test(v.thread || '') ? await ctx.guild.channels.fetch(v.thread).catch(() => null) : null;
+          if (!th || !th.isThread?.() || !FORUM.includes(th.parent?.type)) { bad.push(`That post for ${OUTCOMES[o].label} no longer exists.`); continue; }
+          threads[o] = { thread: th.id, forum: th.parentId }; forums[o] = null;
+        }
+        patch.outcome_threads = threads; patch.outcome_forums = forums;
+      }
+      if ('allowed_users' in b) {
+        const ids = [...new Set((Array.isArray(b.allowed_users) ? b.allowed_users : []).map(String).filter((x) => SNOW.test(x)))];
+        if (ids.length > 25) bad.push('Up to 25 people can be listed.'); else patch.allowed_users = ids;
+      }
       if (bad.length) return fail(res, 400, 'invalid', bad.join(' '));
       db.saveSettings(gid, patch);
       return json(res, 200, { ok: true, ...data.settingsView(ctx.guild, db.getSettings(gid)) });
     }
+    /* ---------- full control: forums, posts, tags, people ---------- */
+    if (area === 'forums' && req.method === 'GET') {   // every forum with its tags and what the bot may do there
+      const ctx = await guildCtx(req, res, gid, { panel: true }); if (!ctx) return;
+      if (!ctx.access.manage) return fail(res, 403, 'manage_only');
+      const { ChannelType, PermissionFlagsBits } = require('discord.js');
+      const { tagToOutcome } = require('../lib/parse');
+      const me = ctx.guild.members?.me;
+      const list = [...ctx.guild.channels.cache.values()].filter((c) => [ChannelType.GuildForum, ChannelType.GuildMedia].includes(c.type))
+        .sort((x, y) => (x.rawPosition ?? 0) - (y.rawPosition ?? 0))
+        .map((c) => {
+          const tags = (c.availableTags || []).map((t) => t.name), has = Object.fromEntries(Object.keys(OUTCOMES).map((o) => [o, tags.some((n) => tagToOutcome(n) === o)]));
+          const perms = me && c.permissionsFor ? c.permissionsFor(me) : null;
+          return { id: c.id, name: c.name, tags, has, canPost: perms ? perms.has(PermissionFlagsBits.SendMessagesInThreads) && perms.has(PermissionFlagsBits.CreatePublicThreads) : null, canTag: perms ? perms.has(PermissionFlagsBits.ManageChannels) : null };
+        });
+      return json(res, 200, { forums: list });
+    }
+    if (area === 'posts' && req.method === 'GET') {   // the posts inside one forum, newest first, to pick a destination
+      const ctx = await guildCtx(req, res, gid, { panel: true }); if (!ctx) return;
+      if (!ctx.access.manage) return fail(res, 403, 'manage_only');
+      const forum = q.get('forum'); if (!SNOW.test(forum || '')) return fail(res, 400, 'invalid', 'Pick a forum.');
+      const { listPosts } = require('../lib/posts');
+      const { posts } = await listPosts(ctx.guild, forum);
+      return json(res, 200, { posts: posts.slice(0, 200).map((x) => ({ id: x.id, name: x.name, archived: x.archived, locked: x.locked })) });
+    }
+    if (area === 'members' && req.method === 'GET') {   // search people to allow, or resolve the allowed list
+      const ctx = await guildCtx(req, res, gid, { panel: true }); if (!ctx) return;
+      if (!ctx.access.manage) return fail(res, 403, 'manage_only');
+      const pack = (u, m) => ({ id: u.id, name: m?.displayName || u.globalName || u.username, tag: u.username, avatar: (m || u).displayAvatarURL?.({ size: 64 }) || null, bot: !!u.bot });
+      if (q.get('ids') !== null) {
+        const ids = String(q.get('ids')).split(',').filter((x) => SNOW.test(x)).slice(0, 25);
+        const out = [];
+        for (const id of ids) {
+          const m = await ctx.guild.members.fetch(id).catch(() => null), u = m?.user || await client.users.fetch(id).catch(() => null);
+          out.push(u ? pack(u, m) : { id, name: 'Unknown user', tag: id, avatar: null });
+        }
+        return json(res, 200, { members: out });
+      }
+      const query = clean(q.get('q'), 32);
+      if (query.length < 2) return json(res, 200, { members: [] });
+      try {
+        const found = await ctx.guild.members.search({ query, limit: 10 });
+        return json(res, 200, { members: [...found.values()].filter((m) => !m.user.bot).map((m) => pack(m.user, m)) });
+      } catch (e) { return fail(res, 502, 'search_failed', `Discord would not search members (${e.message}). You can still paste a user ID.`); }
+    }
+
     if (area === 'action' && req.method === 'POST') {
       const ctx = await guildCtx(req, res, gid, { manage: true }); if (!ctx) return;
       const { scanGuild, summaryText } = require('../lib/scanner');
@@ -286,6 +354,26 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
         const d = DATE.test(body.date || '') ? body.date : todayFor(ctx.settings);
         const img = body.kind === 'day' ? r.dailyImage(gid, d, ctx.settings) : body.kind === 'month' ? r.monthlyImage(gid, Number(d.slice(0, 4)), Number(d.slice(5, 7)), ctx.settings) : r.weeklyImage(gid, d, ctx.settings);
         await r.sendReport(channel, img, ctx.settings);
+        return json(res, 200, { ok: true, channel: channel.name });
+      }
+      if (a1 === 'tags') {   // give a forum the outcome tags it is missing, so posts are tagged Win / Loss / ...
+        const body = await readBody(req), { tagToOutcome } = require('../lib/parse');
+        const forum = SNOW.test(body.forum || '') ? await ctx.guild.channels.fetch(body.forum).catch(() => null) : null;
+        if (!forum || !Array.isArray(forum.availableTags)) return fail(res, 400, 'invalid', 'Pick a forum.');
+        const have = forum.availableTags, missing = Object.values(OUTCOMES).filter((o) => !have.some((t) => tagToOutcome(t.name) === o.key));
+        if (!missing.length) return json(res, 200, { ok: true, added: [] });
+        if (have.length + missing.length > 20) return fail(res, 400, 'too_many_tags', 'That forum already has close to 20 tags, Discord’s limit. Remove a few first.');
+        try { await forum.setAvailableTags([...have.map((t) => ({ id: t.id, name: t.name, moderated: t.moderated, emoji: t.emoji })), ...missing.map((o) => ({ name: o.tag }))]); }
+        catch (e) { return fail(res, 403, 'no_permission', /Missing Permissions/i.test(e.message) ? 'The bot needs Manage Channels on that forum to add tags.' : e.message); }
+        return json(res, 200, { ok: true, added: missing.map((o) => o.tag) });
+      }
+      if (a1 === 'test-post') {   // proves the bot can post where the reports go
+        if (!ctx.settings.report_channel_id) return fail(res, 400, 'no_channel', 'Pick a report channel first.');
+        const channel = await ctx.guild.channels.fetch(ctx.settings.report_channel_id).catch(() => null);
+        if (!channel) return fail(res, 400, 'no_channel', 'The report channel no longer exists.');
+        const { card, v2 } = require('../lib/ui');
+        try { await channel.send(v2(card(`✅ **The journal can post here.**\n-# A test from the control panel by <@${ctx.session.uid}>. Weekly and month-end cards will arrive in this channel.`))); }
+        catch (e) { return fail(res, 403, 'no_permission', /Missing (Permissions|Access)/i.test(e.message) ? `The bot can't post in #${channel.name}. Give it View, Send Messages and Attach Files there.` : e.message); }
         return json(res, 200, { ok: true, channel: channel.name });
       }
       if (a1 === 'redate-plan') {

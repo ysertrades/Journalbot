@@ -109,6 +109,40 @@ test('the API: signed out, signed in, every read; writes need CSRF and Manage Se
   assert.equal(logged.status, 400); assert.match(logged.json.detail, /Instrument is required/); assert.match(logged.json.detail, /not an amount/);
 });
 
+test('full control: forums with tags, a forum’s posts, adding tags, existing-post destinations, people', async () => {
+  const forum = guild.channels.cache.get('900000000000000001');
+  forum.availableTags = [{ id: 't1', name: 'Win' }];
+  forum.setAvailableTags = async (tags) => { forum.availableTags = tags.map((t, i) => ({ id: t.id || `n${i}`, name: t.name })); };
+  forum.threads = { fetchArchived: async () => ({ threads: new Map(), hasMore: false }) };
+  const thread = { id: '700000000000000001', name: 'Wins ledger', parentId: forum.id, parent: { type: 15 }, isThread: () => true, createdTimestamp: 1 };
+  guild.channels.fetchActiveThreads = async () => ({ threads: new Map([[thread.id, thread]]) });
+  guild.channels.fetch = async (id) => (id === thread.id ? thread : guild.channels.cache.get(id) || null);
+  guild.members = { me: null, fetch: async (id) => ({ displayName: 'Trader', user: { id, username: 'trader', bot: false }, displayAvatarURL: () => null }),
+    search: async ({ query }) => new Map([['444444444444444444', { displayName: `${query}!`, user: { id: '444444444444444444', username: 'sam', bot: false }, displayAvatarURL: () => null }]]) };
+  db.saveSettings(GID, { allowed_users: [] });
+  const t = tokenFor(), me = (await call('GET', '/api/me', { headers: bearer(t) })).json, w = { ...bearer(t), 'x-csrf': me.csrf };
+  const fl = (await call('GET', `/api/g/${GID}/forums`, { headers: bearer(t) })).json.forums;
+  assert.equal(fl[0].name, 'wins'); assert.deepEqual(fl[0].has, { win: true, loss: false, be: false, missed: false });
+  const posts = (await call('GET', `/api/g/${GID}/posts?forum=${forum.id}`, { headers: bearer(t) })).json.posts;
+  assert.deepEqual(posts.map((x) => x.name), ['Wins ledger']);
+  const tags = (await call('POST', `/api/g/${GID}/action/tags`, { headers: w, body: { forum: forum.id } })).json;
+  assert.deepEqual(tags.added, ['Loss', 'Breakeven', 'Missed']); assert.equal(forum.availableTags.length, 4);
+  assert.equal((await call('PATCH', `/api/g/${GID}/settings`, { headers: w, body: { outcome_threads: { win: { thread: thread.id } } } })).status, 200);
+  assert.deepEqual(db.getSettings(GID).outcome_threads.win, { thread: thread.id, forum: forum.id });
+  const gone = await call('PATCH', `/api/g/${GID}/settings`, { headers: w, body: { outcome_threads: { loss: { thread: '700000000000000099' } } } });
+  assert.equal(gone.status, 400);
+  const found = (await call('GET', `/api/g/${GID}/members?q=sa`, { headers: bearer(t) })).json.members;
+  assert.equal(found[0].id, '444444444444444444');
+  assert.equal((await call('PATCH', `/api/g/${GID}/settings`, { headers: w, body: { allowed_users: ['444444444444444444', 'nope'] } })).status, 200);
+  assert.deepEqual(db.getSettings(GID).allowed_users, ['444444444444444444']);
+  assert.equal((await call('GET', `/api/g/${GID}/members?ids=444444444444444444`, { headers: bearer(t) })).json.members[0].name, 'Trader');
+  db.saveSettings(GID, { allowed_users: [] });
+  // a drawn card is kept until the journal changes
+  const c1 = await call('GET', `/api/g/${GID}/card/week?date=2026-10-12`, { headers: bearer(t) });
+  const c2 = await call('GET', `/api/g/${GID}/card/week?date=2026-10-12`, { headers: bearer(t) });
+  assert.ok(c1.raw.equals(c2.raw)); assert.match(c2.headers['cache-control'], /max-age/);
+});
+
 test('stats and insights: the numbers a trader reads', () => {
   const list = [{ outcome: 'win', pnl: 300, date: '2026-10-12', r: 2, direction: 'Long', time: '09:30', held: '10m' }, { outcome: 'loss', pnl: -100, date: '2026-10-12', r: -1, direction: 'Short', time: '10:00', held: '4m' },
     { outcome: 'win', pnl: 200, date: '2026-10-13', r: 1, direction: 'Long', time: '09:45', held: '12m' }, { outcome: 'missed', pnl: 0, date: '2026-10-13' }];

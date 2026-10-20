@@ -25,7 +25,7 @@
   async function api(path, { method = 'GET', body } = {}) {
     const headers = { accept: 'application/json' };
     if (S.token) headers.authorization = `Bearer ${S.token}`;
-    if (method !== 'GET') { headers['x-csrf'] = S.csrf || ''; headers['content-type'] = 'application/json'; }
+    if (method !== 'GET') { headers['x-csrf'] = S.csrf || ''; headers['content-type'] = 'application/json'; forgetCards(); }   // a change makes kept cards stale
     const res = await fetch(path, { method, headers, credentials: 'same-origin', body: body ? JSON.stringify(body) : undefined });
     const data = res.headers.get('content-type')?.includes('json') ? await res.json() : null;
     if (res.status === 401) { showGate(); throw new Error('Signed out'); }
@@ -33,6 +33,13 @@
     return data;
   }
   const g = (p) => `/api/g/${S.gid}/${p}`;
+  // drawn cards, kept for the session as blob URLs; any change to the journal clears them
+  const cardStore = new Map();
+  function cardBlob(path) {
+    if (!cardStore.has(path)) cardStore.set(path, blobUrl(path).catch((e) => { cardStore.delete(path); throw e; }));
+    return cardStore.get(path);
+  }
+  function forgetCards() { for (const p of cardStore.values()) p.then((u) => URL.revokeObjectURL(u)).catch(() => {}); cardStore.clear(); }
   async function blobUrl(path) {   // card images need the session header inside an embed
     const res = await fetch(path, { headers: S.token ? { authorization: `Bearer ${S.token}` } : {}, credentials: 'same-origin' });
     if (!res.ok) throw new Error('Could not draw that card');
@@ -83,9 +90,14 @@
   });
 
   /* ---------- boot and the server switcher ---------- */
+  // the splash's bar is real progress: signed in, server picked, first page drawn
+  const BOOT_T0 = performance.now(), SPLASH_MIN = 1500;
+  const progress = (p) => $('#splash')?.style.setProperty('--p', `${p}%`);
+  requestAnimationFrame(() => progress(22));
   async function boot() {
     let me;
     try { me = await api('/api/me'); } catch { return showGate('The journal is starting up. Try again in a moment.'); }
+    progress(55);
     if (!me.signedIn) return showGate(me.login ? null : 'Login is not set up on this host yet. Add the Discord variables and restart the bot.');
     S.me = me; S.csrf = me.csrf;
     if (!me.guilds.length) return showGate('None of your servers have the journal bot yet, or the journal there is limited to other people. Add the bot, then sign in again.');
@@ -95,15 +107,20 @@
     $('#me-name').textContent = me.user.name; if (me.user.avatar) $('#me-av').src = me.user.avatar;
     pickGuild(S.gid, false);
     document.body.classList.remove('booting');
-    $('#shell').classList.add('intro');
     [...$('#nav').children, ...$('.side-foot').children].forEach((c, i) => c.style.setProperty('--i', i));
+    progress(78);
     await route();
-    landSplash();
+    progress(100);
+    // the splash plays its full length even on a fast load: the bar fills, then the mark flies
+    const wait = Math.max(450, SPLASH_MIN - (performance.now() - BOOT_T0));
+    setTimeout(landSplash, wait);
   }
   /** the splash's mark flies to the sidebar's logo and becomes it; on a phone it simply fades */
   function landSplash() {
     const sp = $('#splash'); if (!sp || sp.classList.contains('gone')) return;
     const mark = $('#splash-mark'), target = $('.side .brand img'), to = target.getBoundingClientRect(), from = mark.getBoundingClientRect();
+    // the sidebar cascades and the page rises now, as the splash lets go of them, not underneath it
+    $('#shell').classList.add('intro'); enter($('#view'));
     sp.classList.add('fly');
     if (to.width && innerWidth > 900 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       const s = to.width / (mark.offsetWidth || 64);   // its real size, not mid pop-in
@@ -142,6 +159,7 @@
     const [name, qs] = (location.hash.replace(/^#\/?/, '') || 'overview').split('?');
     const page = PAGES[name] || PAGES.overview, key = PAGES[name] ? name : 'overview';
     if (key === 'settings' && !S.guild.manage) { location.hash = '#/overview'; return; }
+    if (key !== 'settings' && !S.guild.journal) { location.hash = '#/settings?tab=access'; return; }   // a manager left off the journal list still runs the bot
     const seq = ++routeSeq, view = $('#view');
     $$('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.page === key));
     document.body.classList.remove('nav-open');
@@ -235,6 +253,10 @@
     Charts.bars($('#by-wd'), d.insights.byWeekday, { money: (v) => money(v) });
     wireTrades(view, d.recent);
     $$('[data-day]', view).forEach((n) => n.addEventListener('click', () => openDay(n.dataset.day)));
+    // while you read the overview, today's cards are drawn quietly, so Cards opens instantly
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 900));
+    idle(() => ['day', 'week', 'month'].forEach((k) => cardBlob(g(`card/${k}?date=${d.today}`)).catch(() => {})));
+    idle(() => cardBlob(g(`card/trades?date=${d.today}&range=week`)).catch(() => {}));
   }
   const kpi = (k, v, s, t = '') => `<div class="kpi"><span class="kicker">${esc(k)}</span><span class="v ${t}">${esc(String(v))}</span><span class="s">${esc(s || '')}</span></div>`;
   function miniCal(cal, today) {
@@ -572,13 +594,25 @@
         <div class="filters"><a class="btn white" id="cdl" download>Download PNG</a>${S.guild.manage ? '<button class="btn" id="cpost">Post to the report channel</button>' : ''}</div>
         <div class="note">Cards use the trading day: after 6 PM New York, a day belongs to the next session.</div>
       </div></section></div>`;
-    let last = null;
-    const draw = async () => {
-      const img = $('#cp'); img.classList.add('loading');
-      const p = new URLSearchParams({ date: st.date }); if (st.theme) p.set('theme', st.theme); if (st.kind === 'trades') p.set('range', st.range);
-      try { const u = await blobUrl(g(`card/${st.kind}?${p}`)); if (last) URL.revokeObjectURL(last); last = u; img.src = u; $('#cdl').href = u; $('#cdl').download = `${st.kind}-${st.date}.png`; } catch (e) { toast(esc(e.message), 'err'); }
-      img.classList.remove('loading');
+    // every card is drawn once and kept: switching kind, theme or ledger period shows it at once,
+    // and the neighbours are fetched in the background so the next switch is instant too
+    const urlFor = (o) => { const p = new URLSearchParams({ date: o.date }); if (o.theme) p.set('theme', o.theme); if (o.kind === 'trades') p.set('range', o.range); return g(`card/${o.kind}?${p}`); };
+    const prefetch = () => {
+      for (const kind of ['day', 'week', 'month', 'trades']) for (const theme of ['', 'light', 'dark']) cardBlob(urlFor({ ...st, kind, theme })).catch(() => {});
+      for (const range of ['day', 'week', 'month']) cardBlob(urlFor({ ...st, kind: 'trades', range })).catch(() => {});
     };
+    let seq = 0;
+    const draw = async () => {
+      const img = $('#cp'), mine = ++seq, u = urlFor(st);
+      const slow = setTimeout(() => img.classList.add('loading'), 90);   // only dims if it actually has to wait
+      try {
+        const src = await cardBlob(u); if (mine !== seq) return;
+        img.src = src; $('#cdl').href = src; $('#cdl').download = `${st.kind}-${st.date}.png`;
+      } catch (e) { toast(esc(e.message), 'err'); }
+      clearTimeout(slow); img.classList.remove('loading');
+      if (mine === 1 || st.date !== prefetched) { prefetched = st.date; setTimeout(prefetch, 120); }
+    };
+    let prefetched = null;
     const segPick = (id, key) => $(id).addEventListener('click', (e) => { const b = e.target.closest('button[data-k]'); if (!b) return; $$(`${id} button`).forEach((x) => x.classList.toggle('on', x === b)); st[key] = b.dataset.k; $('#cr-f').hidden = st.kind !== 'trades'; draw(); });
     segPick('#ck', 'kind'); segPick('#ct', 'theme'); segPick('#cr', 'range');
     $('#cd').addEventListener('change', (e) => { st.date = e.target.value || today; draw(); });
@@ -596,18 +630,20 @@
     const tab = qs.get('tab') || 'general';
     const d = await api(g('settings')); if (seq !== routeSeq) return;
     $('#page-title').innerHTML = 'Control panel, <em>no slash commands.</em>';
-    const T = [['general', 'General'], ['forums', 'Forums'], ['reports', 'Reports'], ['day', 'Trading day'], ['look', 'Appearance'], ['tools', 'Maintenance'], ['embed', 'Embed & hosting']];
+    const T = [['general', 'General'], ['forums', 'Forums'], ['access', 'Access'], ['reports', 'Reports'], ['day', 'Trading day'], ['look', 'Appearance'], ['tools', 'Maintenance'], ['embed', 'Embed & hosting']];
+    const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Istanbul', 'Africa/Casablanca', 'Africa/Cairo', 'Africa/Lagos', 'Asia/Dubai', 'Asia/Riyadh', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Hong_Kong', 'Asia/Tokyo', 'Australia/Sydney', 'UTC'];
     const s = d.settings, opt = (list, cur, none = '— none —') => `<option value="">${none}</option>${list.map((c) => `<option value="${c.id}" ${c.id === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}`;
     const row = (t, desc, ctl) => `<div class="set-row"><div><div class="t">${t}</div><div class="d">${desc}</div></div><div class="ctl">${ctl}</div></div>`;
+    const copyRow = (t, desc, value) => `<div class="set-row stack"><div><div class="t">${t}</div><div class="d">${desc}</div></div><div class="copy-line"><code>${esc(value)}</code><button class="btn sm" data-copy="${esc(value)}">Copy</button></div></div>`;
     const sw = (k, on) => `<button class="switch ${on ? 'on' : ''}" data-switch="${k}" aria-pressed="${on}"></button>`;
     const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const body = {
-      general: `${row('Timezone', 'Report times and trade times are shown in it', `<input class="input" data-k="timezone" value="${esc(s.timezone)}" style="width:220px">`)}
+      general: `${row('Timezone', 'Report times and trade times are shown in it', `<select class="select" data-k="timezone" style="width:230px">${[...new Set([s.timezone, ...ZONES])].map((z) => `<option ${z === s.timezone ? 'selected' : ''}>${esc(z)}</option>`).join('')}</select>`)}
         ${row('Currency', 'The symbol in front of every amount', `<input class="input" data-k="currency" value="${esc(s.currency)}" maxlength="3" style="width:80px">`)}
         ${row('Show R multiples', 'In posts and on cards, when an R is logged', sw('show_r', s.show_r))}
-        ${row('Who can use the journal', s.allowed_users.length ? `${s.allowed_users.length} selected user${s.allowed_users.length === 1 ? '' : 's'} (change in <code>/journal-settings</code> → Advanced)` : 'Anyone with Manage Server', '')}`,
-      forums: `${['win', 'loss', 'be', 'missed'].map((o) => row(`${OUT[o].e} ${OUT[o].label}`, s.outcome_threads?.[o]?.thread ? 'Goes into an existing post (picked in Discord). Choose a forum to post new ones instead.' : 'A new post in this forum each time', `<select class="select" data-of="${o}" style="width:240px">${opt(d.forums, s.outcome_forums?.[o], s.outcome_threads?.[o]?.thread ? '— existing post —' : '— default forum —')}</select>`)).join('')}
-        ${row('Default forum', 'Used for outcomes without their own', `<select class="select" data-k="default_forum_id" style="width:240px">${opt(d.forums, s.default_forum_id)}</select>`)}`,
+        ${row('Who can use the journal', s.allowed_users.length ? `${s.allowed_users.length} selected ${s.allowed_users.length === 1 ? 'person' : 'people'}` : 'Anyone with Manage Server', '<a class="btn sm" href="#/settings?tab=access">Manage access</a>')}`,
+      forums: '<div id="forums-ui"><div class="sk" style="height:260px"></div></div>',
+      access: '<div id="access-ui"><div class="sk" style="height:160px"></div></div>',
       reports: `${row('Report channel', 'Where the weekly and month-end cards are posted', `<select class="select" data-k="report_channel_id" style="width:240px">${opt(d.text, s.report_channel_id)}</select>`)}
         ${row('Weekly report', `Every ${DAYS[s.weekly_day - 1]} at ${esc(s.weekly_time)}`, `<select class="select" data-k="weekly_day" style="width:150px">${DAYS.map((x, i) => `<option value="${i + 1}" ${i + 1 === s.weekly_day ? 'selected' : ''}>${x}</option>`).join('')}</select><input class="input" data-k="weekly_time" value="${esc(s.weekly_time)}" style="width:90px">${sw('weekly_enabled', s.weekly_enabled)}`)}
         ${row('Month-end report', `The last day of each month at ${esc(s.month_time)}`, `<input class="input" data-k="month_time" value="${esc(s.month_time)}" style="width:90px">${sw('month_enabled', s.month_enabled)}`)}
@@ -620,7 +656,8 @@
       look: `${row('Card theme', 'Every image the bot draws', `<div class="seg" data-theme>${[['light', 'Studio'], ['dark', 'Night'], ['auto', 'Auto']].map(([k, l]) => `<button data-v="${k}" class="${s.theme === k ? 'on' : ''}">${l}</button>`).join('')}</div>`)}
         <div class="grid g2" style="margin-top:12px"><div class="cards-preview" style="min-height:0"><img src="/samples/daily-pnl-sample.png" alt="Studio"></div><div class="cards-preview" style="min-height:0"><img src="/samples/dark-daily-pnl-sample.png" alt="Night"></div></div>`,
       tools: `${row('Rescan the forums', 'Re-read every journal post and rebuild PnL', '<button class="btn sm" id="rescan">Rescan</button>')}
-        ${row('Health check', 'Permissions in every forum and channel the bot uses', '<button class="btn sm" id="health">Check</button>')}<div id="tool-out"></div>`,
+        ${row('Health check', 'Permissions in every forum and channel the bot uses', '<button class="btn sm" id="health">Check</button>')}
+        ${row('Test the report channel', 'The bot posts a short message there, to prove it can', '<button class="btn sm" id="test-post">Send a test</button>')}<div id="tool-out"></div>`,
       embed: `<div class="note">Add these in your host's variables, then restart the bot. Values in &lt;angle brackets&gt; are yours to fill in.</div>
         <div class="code">${esc(`SERVER_PORT=<the port your host gives you>
 PUBLIC_BASE_URL=${location.origin}
@@ -628,8 +665,8 @@ DISCORD_CLIENT_ID=<your bot's application id>
 DISCORD_CLIENT_SECRET=<OAuth2 → Client secret>
 SESSION_SECRET=<any long random text>
 PANEL_FRAME_ANCESTORS=https://whop.com https://*.whop.com`)}</div>
-        ${row('Discord redirect', 'Add this exact URL in the Developer Portal → OAuth2 → Redirects', `<code>${esc(location.origin)}/auth/callback</code>`)}
-        ${row('Whop app view', 'In your Whop app, set the experience view to this address', `<code>${esc(location.origin)}/experiences/[experienceId]</code>`)}
+        ${copyRow('Discord redirect', 'Add this exact URL in the Developer Portal → OAuth2 → Redirects', `${location.origin}/auth/callback`)}
+        ${copyRow('Whop app view', 'In your Whop app, set the experience view to this address', `${location.origin}/experiences/[experienceId]`)}
         ${row('Embedding', S.me.embed ? 'On: the panel may be framed by the sites in PANEL_FRAME_ANCESTORS' : 'Off: set PANEL_FRAME_ANCESTORS to allow Whop', S.me.embed ? '<span class="badge win">on</span>' : '<span class="badge">off</span>')}`,
     };
     view.innerHTML = `<div class="tabs">${T.map(([k, l]) => `<a class="btn sm ${k === tab ? 'white' : ''}" href="#/settings?tab=${k}">${l}</a>`).join('')}</div><section class="card" id="set">${body[tab]}</section>`;
@@ -641,6 +678,10 @@ PANEL_FRAME_ANCESTORS=https://whop.com https://*.whop.com`)}</div>
     $('#sess-save')?.addEventListener('click', () => save({ session: 'custom', session_start: $('#sess-start').value, session_fold: true }, 'Trading day updated').then(route));
     $('[data-theme]', view)?.addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (!b) return; $$('[data-theme] button').forEach((x) => x.classList.toggle('on', x === b)); save({ theme: b.dataset.v }, `Cards are ${b.textContent} now`); });
     $$('[data-post]', view).forEach((b) => b.addEventListener('click', async () => { busy(b, true); try { const r = await api(g('action/post'), { method: 'POST', body: { kind: b.dataset.post } }); toast(`Posted to #${esc(r.channel)}.`); } catch (e) { toast(esc(e.message), 'err'); } busy(b, false); }));
+    $$('[data-copy]', view).forEach((b) => b.addEventListener('click', async () => { try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1600); } catch { toast('Copy it by hand: long-press the address.', 'info'); } }));
+    $('#test-post')?.addEventListener('click', async (e) => { busy(e.target, true); try { const r = await api(g('action/test-post'), { method: 'POST' }); toast(`Sent a test to #${esc(r.channel)}.`); } catch (er) { toast(esc(er.message), 'err', 7000); } busy(e.target, false); });
+    if (tab === 'forums') forumsTab($('#forums-ui'), s, d, save, seq);
+    if (tab === 'access') accessTab($('#access-ui'), s, save, seq);
     $('#rescan')?.addEventListener('click', async (e) => { busy(e.target, true); try { const r = await api(g('action/rescan'), { method: 'POST' }); $('#tool-out').innerHTML = `<div class="note">${esc(r.summary).replace(/\n/g, '<br>')}</div>`; } catch (er) { toast(esc(er.message), 'err'); } busy(e.target, false); });
     $('#health')?.addEventListener('click', async (e) => { busy(e.target, true); try { const r = await api(g('action/health'), { method: 'POST' }); $('#tool-out').innerHTML = `<div class="note">${r.lines.map((l) => esc(l).replace(/&lt;#(\d+)&gt;/g, '#channel')).join('<br>')}</div>`; } catch (er) { toast(esc(er.message), 'err'); } busy(e.target, false); });
     $('#redate-plan')?.addEventListener('click', async (e) => {
@@ -656,6 +697,113 @@ PANEL_FRAME_ANCESTORS=https://whop.com https://*.whop.com`)}</div>
         });
       } catch (er) { toast(esc(er.message), 'err'); }
       busy(e.target, false);
+    });
+  }
+
+  /* ---------- control panel: forums, one card per outcome ---------- */
+  async function forumsTab(host, s, d, save, seq) {
+    const f = await api(g('forums')); if (seq !== routeSeq) return;
+    const byId = new Map(f.forums.map((x) => [x.id, x]));
+    const forumOpts = (cur, none) => `<option value="">${none}</option>${f.forums.map((x) => `<option value="${x.id}" ${x.id === cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}`;
+    const state = Object.fromEntries(['win', 'loss', 'be', 'missed'].map((o) => {
+      const th = s.outcome_threads?.[o];
+      return [o, th?.thread ? { mode: 'into', forum: th.forum, thread: th.thread } : { mode: 'new', forum: s.outcome_forums?.[o] || '', thread: null }];
+    }));
+    const tagLine = (o, forumId) => {
+      const fm = byId.get(forumId || s.default_forum_id);
+      if (!fm) return '<span class="muted">Pick a forum to see its tags</span>';
+      const ok = fm.has[o];
+      return `${ok ? `<span class="badge win">✓ ${OUT[o].label} tag</span>` : `<span class="badge">no ${OUT[o].label} tag</span>`}${fm.canPost === false ? ' <span class="badge loss">the bot can\'t post here</span>' : ''}${!ok ? ` <button class="btn sm" data-tags="${fm.id}">Add outcome tags</button>` : ''}`;
+    };
+    const ocCard = (o) => {
+      const st = state[o];
+      return `<div class="oc-card" data-oc="${o}" style="--c:${OUT[o].c}">
+        <div class="oc-h"><b>${OUT[o].e} ${OUT[o].label}</b><div class="seg" data-mode="${o}"><button data-v="new" class="${st.mode === 'new' ? 'on' : ''}">New post each time</button><button data-v="into" class="${st.mode === 'into' ? 'on' : ''}">Into one post</button></div></div>
+        <div class="row2"><label class="field"><span>Forum</span><select class="select" data-ff="${o}">${forumOpts(st.forum, st.mode === 'new' ? '— the default forum —' : '— pick a forum —')}</select></label>
+          ${st.mode === 'into' ? `<label class="field"><span>Post</span><select class="select" data-fp="${o}" ${st.forum ? '' : 'disabled'}><option value="">${st.forum ? 'Loading posts…' : 'pick a forum first'}</option></select></label>` : `<div class="field"><span>Each trade</span><div class="note" style="padding:9px 12px">opens its own post${st.forum ? '' : ' in the default forum'}</div></div>`}</div>
+        <div class="tagline" data-tl="${o}">${tagLine(o, st.forum)}</div></div>`;
+    };
+    const loadPosts = async (o) => {
+      const st = state[o], sel = $(`[data-fp="${o}"]`, host); if (!sel || !st.forum) return;
+      try {
+        const r = await api(g(`posts?forum=${st.forum}`));
+        sel.disabled = false;
+        sel.innerHTML = `<option value="">— pick the post —</option>${r.posts.map((x) => `<option value="${x.id}" ${x.id === st.thread ? 'selected' : ''}>${esc(x.name)}${x.locked ? ' (locked)' : x.archived ? ' (archived)' : ''}</option>`).join('')}`;
+        if (!r.posts.length) sel.innerHTML = '<option value="">this forum has no posts yet</option>';
+      } catch (e) { toast(esc(e.message), 'err'); }
+    };
+    const draw = () => {
+      host.innerHTML = `<p class="soft" style="margin-bottom:14px">Where each outcome is journaled. <b>New post each time</b> opens a fresh forum post per trade; <b>Into one post</b> adds every trade to one running post, like a ledger.</p>
+        <div class="oc-grid">${['win', 'loss', 'be', 'missed'].map(ocCard).join('')}</div>
+        <div class="set-row" style="margin-top:16px"><div><div class="t">Default forum</div><div class="d">Used for an outcome with no forum of its own</div></div><div class="ctl"><select class="select" id="def-forum" style="width:240px">${forumOpts(s.default_forum_id, '— none —')}</select></div></div>
+        <div class="set-row stack"><div><div class="t">Also scan these forums</div><div class="d">Posts you write by hand in them count toward your PnL</div></div><div class="chipset" id="extra">${f.forums.map((x) => `<button class="chip-t ${s.forums.includes(x.id) ? 'on' : ''}" data-x="${x.id}">#${esc(x.name)}</button>`).join('') || '<span class="muted">No forums in this server yet.</span>'}</div></div>`;
+      ['win', 'loss', 'be', 'missed'].forEach((o) => { if (state[o].mode === 'into') loadPosts(o); });
+      [...host.querySelectorAll('.oc-card')].forEach((c, i) => c.style.setProperty('--i', i));
+    };
+    draw();
+    host.addEventListener('click', async (e) => {
+      const m = e.target.closest('[data-mode] button[data-v]');
+      if (m) {
+        const o = m.parentElement.dataset.mode, st = state[o]; if (st.mode === m.dataset.v) return;
+        st.mode = m.dataset.v;
+        if (st.mode === 'new') { st.thread = null; await save({ outcome_forums: { [o]: st.forum || null } }, `${OUT[o].label}: a new post each time`); s.outcome_forums[o] = st.forum || null; s.outcome_threads[o] = null; }
+        const card = host.querySelector(`[data-oc="${o}"]`); card.outerHTML = ocCard(o); if (st.mode === 'into') loadPosts(o);
+        return;
+      }
+      const t = e.target.closest('[data-tags]');
+      if (t) {
+        busy(t, true);
+        try { const r = await api(g('action/tags'), { method: 'POST', body: { forum: t.dataset.tags } }); toast(r.added.length ? `Added ${esc(r.added.join(', '))} tags.` : 'Every outcome tag is already there.'); const fm = byId.get(t.dataset.tags); for (const o of Object.keys(fm.has)) fm.has[o] = true; ['win', 'loss', 'be', 'missed'].forEach((o) => { const tl = host.querySelector(`[data-tl="${o}"]`); if (tl) tl.innerHTML = tagLine(o, state[o].forum); }); }
+        catch (er) { toast(esc(er.message), 'err', 7000); busy(t, false); }
+        return;
+      }
+      const x = e.target.closest('[data-x]');
+      if (x) { x.classList.toggle('on'); const list = [...host.querySelectorAll('[data-x].on')].map((b) => b.dataset.x); s.forums = list; save({ forums: list }, 'Scanned forums saved'); }
+    });
+    host.addEventListener('change', async (e) => {
+      const ff = e.target.closest('[data-ff]'), fp = e.target.closest('[data-fp]');
+      if (ff) {
+        const o = ff.dataset.ff, st = state[o]; st.forum = ff.value; st.thread = null;
+        host.querySelector(`[data-tl="${o}"]`).innerHTML = tagLine(o, st.forum);
+        if (st.mode === 'new') save({ outcome_forums: { [o]: st.forum || null } }, `${OUT[o].label} goes to ${st.forum ? `#${esc(byId.get(st.forum).name)}` : 'the default forum'}`);
+        else { const sel = host.querySelector(`[data-fp="${o}"]`); sel.disabled = true; sel.innerHTML = '<option>Loading posts…</option>'; loadPosts(o); }
+      }
+      if (fp && fp.value) { const o = fp.dataset.fp; state[o].thread = fp.value; save({ outcome_threads: { [o]: { thread: fp.value } } }, `${OUT[o].label} trades now go into “${esc(fp.selectedOptions[0].textContent)}”`); }
+      if (e.target.id === 'def-forum') save({ default_forum_id: e.target.value || null }, 'Default forum saved');
+    });
+  }
+
+  /* ---------- control panel: who can use the journal ---------- */
+  async function accessTab(host, s, save, seq) {
+    let people = s.allowed_users.length ? (await api(g(`members?ids=${s.allowed_users.join(',')}`))).members : [];
+    if (seq !== routeSeq) return;
+    const draw = () => {
+      host.innerHTML = `<div class="note">${people.length ? `Only these ${people.length === 1 ? 'person' : `${people.length} people`} (and the bot's owner) can use the journal, on Discord and here.` : 'Nobody is listed, so <b>anyone with Manage Server</b> can use the journal. Add people to limit it to them.'} Changing settings always needs Manage Server.</div>
+        <div class="people" id="people">${people.map((p) => `<span class="person"><img src="${esc(p.avatar || '/favicon.svg')}" alt="" width="26" height="26"><b>${esc(p.name)}</b><small>@${esc(p.tag)}</small><button class="x" data-rm="${p.id}" aria-label="Remove ${esc(p.name)}">×</button></span>`).join('')}</div>
+        <div class="field" style="position:relative;margin-top:14px"><span>Add someone</span><input class="input" id="who" placeholder="Search a name, or paste a user ID" autocomplete="off"><div class="who-list" id="who-list" hidden></div></div>`;
+    };
+    draw();
+    const commit = async (list, msg) => { await save({ allowed_users: list.map((p) => p.id) }, msg); s.allowed_users = list.map((p) => p.id); };
+    host.addEventListener('click', async (e) => {
+      const rm = e.target.closest('[data-rm]');
+      if (rm) { const p = people.find((x) => x.id === rm.dataset.rm); people = people.filter((x) => x.id !== rm.dataset.rm); rm.closest('.person').classList.add('leaving'); await commit(people, `${esc(p?.name || 'They')} can no longer use the journal`); setTimeout(draw, 250); return; }
+      const add = e.target.closest('[data-add]');
+      if (add) { const p = JSON.parse(add.dataset.add); if (!people.some((x) => x.id === p.id)) { people.push(p); await commit(people, `${esc(p.name)} can use the journal now`); } draw(); $('#who', host).focus(); }
+    });
+    let tmr;
+    host.addEventListener('input', (e) => {
+      if (e.target.id !== 'who') return;
+      clearTimeout(tmr);
+      const v = e.target.value.trim(), list = $('#who-list', host);
+      if (/^\d{17,20}$/.test(v)) { list.hidden = false; list.innerHTML = `<button data-add='${esc(JSON.stringify({ id: v, name: `User ${v.slice(-4)}`, tag: v, avatar: null }))}'>Add user ID <b>${esc(v)}</b></button>`; return; }
+      if (v.length < 2) { list.hidden = true; return; }
+      tmr = setTimeout(async () => {
+        try {
+          const r = await api(g(`members?q=${encodeURIComponent(v)}`));
+          list.hidden = false;
+          list.innerHTML = r.members.length ? r.members.map((p) => `<button data-add='${esc(JSON.stringify(p))}'><img src="${esc(p.avatar || '/favicon.svg')}" alt="" width="24" height="24"><b>${esc(p.name)}</b><small>@${esc(p.tag)}</small></button>`).join('') : '<div class="muted" style="padding:10px 12px">Nobody by that name.</div>';
+        } catch (er) { list.hidden = false; list.innerHTML = `<div class="muted" style="padding:10px 12px">${esc(er.message)}</div>`; }
+      }, 250);
     });
   }
 
