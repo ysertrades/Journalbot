@@ -70,5 +70,13 @@ const server = createServer(client), handle = server.listeners('request')[0];
 const token = auth.sign({ uid: '222222222222222222', name: 'Yasser', avatar: null, g: [{ id: GID, m: 1 }], exp: Date.now() + 86400000 });
 http.createServer((req, res) => {
   if (req.url === '/dev-login') { res.writeHead(302, { location: '/app', 'set-cookie': auth.cookie(auth.SESSION_COOKIE, token, 86400000) }); return res.end(); }
+  if (req.url === '/dev-trade' && req.method === 'POST') {   // as if someone just ran /journal in Discord: the open journal should update live
+    const at = DateTime.now().setZone('America/New_York'), key = `97${String(Date.now()).padStart(16, '0')}`, date = tradingDay(at, db.getSettings(GID)), cents = 84000;
+    const f = { instrument: 'NQ', direction: 'Long', date, pnl_cents: cents, r: 1.7, session: 'NY AM', _at: at.toMillis(), followed: 'YES' };
+    db.insertEntry({ guild_id: GID, user_id: '222222222222222222', outcome: 'win', instrument: 'NQ', direction: 'Long', session: 'NY AM', setup: null, entry: null, stop: null, target: null, exit: null,
+      r_multiple: 1.7, pnl_cents: cents, potential_cents: null, followed_plan: 'YES', fields_json: JSON.stringify(f), date_local: date, forum_id: '900000000000000001', thread_id: key, message_id: key, image_name: null, created_at: at.toMillis() });
+    db.upsertPnl({ thread_id: key, container_id: key, guild_id: GID, forum_id: '900000000000000001', outcome: 'win', pnl_cents: cents, date_local: date, source: 'bot' });
+    res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ key }));
+  }
   return handle(req, res);
 }).listen(4321, () => console.log('web preview on http://localhost:4321  (sign in: /dev-login)'));

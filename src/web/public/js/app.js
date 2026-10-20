@@ -156,6 +156,7 @@
     $('#server-name').textContent = S.guild.name;
     const ic = $('#server-ic'); ic.style.backgroundImage = S.guild.icon ? `url("${S.guild.icon}")` : ''; ic.textContent = S.guild.icon ? '' : S.guild.name.slice(0, 1).toUpperCase();
     document.body.classList.toggle('can-manage', !!S.guild.manage);
+    liveStart();
     if (rerender) route();
   }
   $('#server-btn').addEventListener('click', (e) => {
@@ -167,6 +168,89 @@
   document.addEventListener('click', (e) => { if (!e.target.closest('#server-menu, #server-btn')) $('#server-menu').hidden = true; });
   $('#burger').addEventListener('click', () => document.body.classList.toggle('nav-open'));
   $('#nav-scrim').addEventListener('click', () => document.body.classList.remove('nav-open'));
+
+  /* ---------- live: a trade logged in Discord shows up here within a second ---------- */
+  // The server streams the journal's stamp and pushes a new one the moment something changes. A fetch
+  // stream (not EventSource) so the embed's session header goes along. If a proxy will not stream, the
+  // page checks the stamp every few seconds instead, and always when you come back to the tab.
+  const live = { ctl: null, stamp: null, poll: 0, fails: 0, dirty: false, retry: 0 };
+  const LIVE_PAGES = new Set(['overview', 'calendar', 'trades', 'insights']);
+  function liveStart() {
+    liveStop(); live.stamp = null; live.fails = 0;
+    if (!S.gid) return;
+    if (!window.ReadableStream || !window.TextDecoderStream) return livePoll();
+    liveConnect();
+  }
+  function liveStop() { live.ctl?.abort(); live.ctl = null; clearInterval(live.poll); live.poll = 0; clearTimeout(live.retry); }
+  async function liveConnect() {
+    const ctl = new AbortController(), gid = S.gid; live.ctl = ctl;
+    let heard = false;
+    const deaf = setTimeout(() => { if (!heard && live.ctl === ctl) { liveStop(); livePoll(); } }, 9000);   // nothing came through: a buffering proxy
+    try {
+      const res = await fetch(g('live'), { headers: S.token ? { authorization: `Bearer ${S.token}` } : {}, credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
+      if (!res.ok || !res.body) throw new Error(`live ${res.status}`);
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += value;
+        for (let i; (i = buf.indexOf('\n\n')) >= 0;) {
+          const msg = buf.slice(0, i); buf = buf.slice(i + 2);
+          const dat = msg.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5)).join('');
+          if (!dat) continue;
+          heard = true; live.fails = 0; clearTimeout(deaf);
+          try { liveStamp(JSON.parse(dat).stamp); } catch {}
+        }
+      }
+    } catch {}
+    clearTimeout(deaf);
+    if (live.ctl !== ctl || gid !== S.gid) return;   // stopped, switched server, or fell back to polling
+    live.fails += 1;
+    if (!heard && live.fails >= 3) { liveStop(); return livePoll(); }
+    live.retry = setTimeout(liveConnect, Math.min(20000, 1000 * 2 ** live.fails));   // the stream ended: reconnect, gently
+  }
+  function livePoll() { clearInterval(live.poll); live.poll = setInterval(() => { if (!document.hidden) liveCheck(); }, 5000); liveCheck(); }
+  async function liveCheck() {
+    if (!S.gid) return;
+    try { const d = await fetchApi(g('stamp')); liveStamp(d.stamp); } catch {}
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.gid && S.me) liveCheck(); });   // phones pause streams in the background
+  function liveStamp(stamp) {
+    if (live.stamp === null || !stamp) { live.stamp = stamp; return; }
+    if (stamp === live.stamp) return;
+    live.stamp = stamp;
+    reads.clear(); forgetCards();
+    live.dirty = true; liveRefresh();
+  }
+  /** redraw the open tab with the new numbers, in place: no fade, no scroll, new trades glow as they land */
+  async function liveRefresh() {
+    if (!live.dirty) return;
+    const key = (location.hash.replace(/^#\/?/, '') || 'overview').split('?')[0];
+    if (!LIVE_PAGES.has(key)) { live.dirty = false; return; }   // the next visit reads fresh anyway
+    const typing = document.activeElement?.closest?.('#view') && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if (S.routing || typing || $('#drawer').classList.contains('on') || !$('#palette').hidden) { setTimeout(liveRefresh, 1500); return; }
+    live.dirty = false;
+    const view = $('#view'), seen = new Set($$('[data-key]', view).map((n) => n.dataset.key)), kv = $$('.kpi .v', view).map((n) => n.textContent);
+    try {
+      if (key === 'trades' && S.reload?.seq === routeSeq) await S.reload.fn();
+      else await redraw();
+    } catch { return; }
+    if (seen.size) $$('[data-key]', view).forEach((n) => { if (!seen.has(n.dataset.key)) n.classList.add('fresh'); });
+    $$('.kpi .v', view).forEach((n, i) => { if (kv[i] !== undefined && kv[i] !== n.textContent) n.classList.add('bump'); });
+  }
+  /** the current page drawn again under its own header, holding its height so nothing below moves */
+  async function redraw() {
+    const [name, qs] = (location.hash.replace(/^#\/?/, '') || 'overview').split('?');
+    const page = PAGES[name] || PAGES.overview, seq = ++routeSeq, view = $('#view');
+    view.style.minHeight = `${view.offsetHeight}px`;
+    S.routing = seq; S.pending = { title: null, tools: document.createElement('div') };
+    try { await page.run(view, new URLSearchParams(qs || ''), seq); }
+    finally { if (seq === routeSeq) S.routing = 0; }
+    if (seq !== routeSeq) return;
+    if (S.pending.title) setTitle(S.pending.title);
+    const box = $('#top-tools'); box.innerHTML = ''; box.append(...S.pending.tools.childNodes);
+    view.style.minHeight = '';
+  }
 
   /* ---------- router ---------- */
   const PAGES = {
@@ -427,6 +511,7 @@
     $('#f-sym').addEventListener('change', (e) => { st.symbol = e.target.value; re(); });
     $('#f-lens').addEventListener('change', (e) => { st.lens = e.target.value; re(); });
     let tmr; $('#f-q').addEventListener('input', (e) => { clearTimeout(tmr); tmr = setTimeout(() => { st.q = e.target.value.trim(); re(); }, 260); });
+    S.reload = { seq, fn: load };   // a live update reloads the ledger with your filters and page kept
     await load();
   }
 

@@ -24,6 +24,7 @@ const INVITE_PERMS = (1n << 10n | 1n << 11n | 1n << 14n | 1n << 15n | 1n << 16n 
 module.exports = function routes(client, { json, fail, readBody, limited }) {
   const jobs = new Map();   // CSV imports and re-date runs, polled by the page
   const cardCache = new Map();   // drawn PNGs by request + journal stamp
+  const live = new Set();   // open live streams
 
   function picture(body) {
     if (!body.image) return { image: null };
@@ -102,6 +103,29 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
     const m = p.match(/^\/api\/g\/(\d+)\/([a-z-]+)(?:\/([\w-]+))?(?:\/([\w-]+))?$/);
     if (!m) return fail(res, 404, 'not_found');
     const [, gid, area, a1, a2] = m;
+
+    /* ---------- live: the journal's stamp, pushed the moment a trade or a setting changes ---------- */
+    if (area === 'live' && req.method === 'GET') {
+      const ctx = await guildCtx(req, res, gid, { panel: true }); if (!ctx) return;
+      if (live.size >= 1000) return fail(res, 503, 'busy', 'Live updates are full right now.');
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', 'x-accel-buffering': 'no', connection: 'keep-alive', 'x-content-type-options': 'nosniff' });
+      req.socket.setNoDelay?.(true); req.socket.setTimeout?.(0);
+      let last = db.journalStamp(gid), wait = null;
+      const push = () => res.write(`data: ${JSON.stringify({ stamp: last })}\n\n`);
+      res.write(`retry: 4000\n:${' '.repeat(2048)}\n\n`);   // padding: some proxies hold back the first couple of KB
+      push();
+      // a CSV import writes dozens of rows: they arrive as one update
+      const onChange = (g) => { if (g !== gid || wait) return; wait = setTimeout(() => { wait = null; const s = db.journalStamp(gid); if (s !== last) { last = s; push(); } }, 250); };
+      const beat = setInterval(() => res.write(': ping\n\n'), 25000);
+      const stop = setTimeout(() => res.end(), 30 * 60000);   // the page reconnects, and the session is checked again
+      const me = { gid }; live.add(me); db.changes.on('change', onChange);
+      res.on('close', () => { live.delete(me); db.changes.off('change', onChange); clearInterval(beat); clearTimeout(stop); clearTimeout(wait); });
+      return;
+    }
+    if (area === 'stamp' && req.method === 'GET') {   // the fallback when a proxy will not stream
+      const ctx = await guildCtx(req, res, gid, { panel: true }); if (!ctx) return;
+      return json(res, 200, { stamp: db.journalStamp(gid) });
+    }
 
     /* ---------- reading ---------- */
     if (area === 'overview' && req.method === 'GET') {

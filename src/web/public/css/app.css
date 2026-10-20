@@ -376,3 +376,12 @@ textarea.input { height: auto; min-height: 84px; padding: 11px 13px; resize: ver
 .crumbs.swap, #top-tools.swap, #page-title.swap { opacity: 0; transform: translateY(-8px); filter: blur(4px); transition-duration: .16s; }
 .title-sk { display: inline-block; width: min(320px, 60vw); height: .8em; border-radius: 12px; background: var(--panel2); position: relative; overflow: hidden; vertical-align: middle; }
 .title-sk::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .06), transparent); transform: translateX(-100%); animation: shim 1.3s infinite; }
+
+/* ── live: a trade that just arrived from Discord glows in, a number that moved gives a small pulse ── */
+.li.fresh, .tc.fresh { animation: fresh-in 2.6s var(--ease) both; }
+tr.row.fresh > td { animation: fresh-row 2.6s var(--ease) both; }
+@keyframes fresh-in { 0% { opacity: 0; transform: translateY(-10px) scale(.98); box-shadow: inset 0 0 0 1.5px var(--win), 0 0 0 8px rgba(60, 207, 122, .16); }
+  18% { opacity: 1; transform: none; box-shadow: inset 0 0 0 1.5px var(--win), 0 0 0 6px rgba(60, 207, 122, .14); } }
+@keyframes fresh-row { 0%, 30% { background: rgba(60, 207, 122, .12); } }
+.kpi .v.bump { animation: bump .8s var(--spring); transform-origin: 0 50%; }
+@keyframes bump { 35% { transform: scale(1.07); filter: brightness(1.35); } }
