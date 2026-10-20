@@ -90,6 +90,10 @@ const hasCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) =>
 if (!hasCol('journal_settings', 'outcome_forums_json')) db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_forums_json TEXT NOT NULL DEFAULT '{}'");
 if (!hasCol('journal_settings', 'outcome_threads_json')) db.exec("ALTER TABLE journal_settings ADD COLUMN outcome_threads_json TEXT NOT NULL DEFAULT '{}'");
 if (!hasCol('journal_settings', 'theme')) db.exec("ALTER TABLE journal_settings ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'");
+// the trading day: futures roll at 6 PM New York time unless the server picks otherwise
+if (!hasCol('journal_settings', 'session_start')) db.exec("ALTER TABLE journal_settings ADD COLUMN session_start TEXT NOT NULL DEFAULT '18:00'");
+if (!hasCol('journal_settings', 'session_zone')) db.exec("ALTER TABLE journal_settings ADD COLUMN session_zone TEXT NOT NULL DEFAULT 'America/New_York'");
+if (!hasCol('journal_settings', 'session_fold')) db.exec('ALTER TABLE journal_settings ADD COLUMN session_fold INTEGER NOT NULL DEFAULT 1');
 if (!hasCol('pnl_entries', 'container_id')) db.exec('ALTER TABLE pnl_entries ADD COLUMN container_id TEXT');
 db.exec('UPDATE pnl_entries SET container_id = thread_id WHERE container_id IS NULL');
 db.exec('CREATE INDEX IF NOT EXISTS idx_pnl_container ON pnl_entries (container_id)');
@@ -103,6 +107,7 @@ const DEFAULTS = {
   month_enabled: true, month_time: '17:00',
   timezone: 'America/New_York', currency: '$', show_r: true,
   ping_role_id: null, allowed_users: [], outcome_forums: {}, outcome_threads: {}, theme: 'light',
+  session_start: '18:00', session_zone: 'America/New_York', session_fold: true,
 };
 const THEMES = ['light', 'dark', 'auto'];
 
@@ -119,6 +124,7 @@ function rowToSettings(guildId, r) {
     outcome_forums: JSON.parse(r.outcome_forums_json || '{}'),
     outcome_threads: JSON.parse(r.outcome_threads_json || '{}'),
     theme: THEMES.includes(r.theme) ? r.theme : 'light',
+    session_start: r.session_start || '18:00', session_zone: r.session_zone || 'America/New_York', session_fold: r.session_fold === undefined || r.session_fold === null ? true : !!r.session_fold,
   };
 }
 
@@ -131,14 +137,15 @@ function saveSettings(guildId, patch) {
   const n = { ...cur, ...patch };
   db.prepare(`INSERT INTO journal_settings
     (guild_id, forums_json, default_forum_id, report_channel_id, weekly_day, weekly_time, weekly_enabled,
-     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json, outcome_threads_json, theme)
+     month_enabled, month_time, timezone, currency, show_r, ping_role_id, allowed_users_json, outcome_forums_json, outcome_threads_json, theme, session_start, session_zone, session_fold)
     VALUES (@guild_id,@forums_json,@default_forum_id,@report_channel_id,@weekly_day,@weekly_time,@weekly_enabled,
-     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json,@outcome_threads_json,@theme)
+     @month_enabled,@month_time,@timezone,@currency,@show_r,@ping_role_id,@allowed_users_json,@outcome_forums_json,@outcome_threads_json,@theme,@session_start,@session_zone,@session_fold)
     ON CONFLICT(guild_id) DO UPDATE SET forums_json=excluded.forums_json, default_forum_id=excluded.default_forum_id,
      report_channel_id=excluded.report_channel_id, weekly_day=excluded.weekly_day, weekly_time=excluded.weekly_time,
      weekly_enabled=excluded.weekly_enabled, month_enabled=excluded.month_enabled, month_time=excluded.month_time,
      timezone=excluded.timezone, currency=excluded.currency, show_r=excluded.show_r, ping_role_id=excluded.ping_role_id,
-     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json, outcome_threads_json=excluded.outcome_threads_json, theme=excluded.theme`).run({
+     allowed_users_json=excluded.allowed_users_json, outcome_forums_json=excluded.outcome_forums_json, outcome_threads_json=excluded.outcome_threads_json, theme=excluded.theme,
+     session_start=excluded.session_start, session_zone=excluded.session_zone, session_fold=excluded.session_fold`).run({
     guild_id: guildId, forums_json: JSON.stringify(n.forums || []), default_forum_id: n.default_forum_id ?? null,
     report_channel_id: n.report_channel_id ?? null, weekly_day: n.weekly_day, weekly_time: n.weekly_time,
     weekly_enabled: n.weekly_enabled ? 1 : 0, month_enabled: n.month_enabled ? 1 : 0, month_time: n.month_time,
@@ -147,6 +154,7 @@ function saveSettings(guildId, patch) {
     outcome_forums_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_forums || {}).filter(([, v]) => v))),
     outcome_threads_json: JSON.stringify(Object.fromEntries(Object.entries(n.outcome_threads || {}).filter(([, v]) => v && v.thread))),
     theme: THEMES.includes(n.theme) ? n.theme : 'light',
+    session_start: /^([01]\d|2[0-3]):[0-5]\d$/.test(n.session_start || '') ? n.session_start : '18:00', session_zone: n.session_zone || 'America/New_York', session_fold: n.session_fold === false ? 0 : 1,
   });
   return getSettings(guildId);
 }

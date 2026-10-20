@@ -154,7 +154,7 @@ function durationMs(v) {
  * @returns {{ trades, skipped: [{row, why}], format, columns, total }}
  *   trades: [{ hash, outcome, instrument, direction, qty, entry, exit, date, at, pnl_cents, fee_cents, held }]
  */
-function readTrades(text, tz) {
+function readTrades(text, tz, dayOf = null) {
   const rows = parseCsv(text);
   if (rows.length < 2) return { trades: [], skipped: [], columns: [], error: 'That file has no trade rows.' };
   // the header is the first row with at least two recognised column names
@@ -224,7 +224,9 @@ function readTrades(text, tz) {
     seen.add(hash);
     trades.push({
       hash, keys, extId: ext || null, outcome, instrument, direction: side || 'Long', qty: qty !== null ? Math.abs(qty) : null,
-      entry: fmtPrice(entry), exit: fmtPrice(exit), date: tDay.toISODate(), at: tDay.toMillis(), opened: openAt ? openAt.toMillis() : null,
+      entry: fmtPrice(entry), exit: fmtPrice(exit), // the trading day: a trade closed after the session rolls (6 PM ET for futures) belongs to the next one.
+      // A date-only file has no time to roll, so its dates are kept as written.
+      date: dayOf && (tIn || tOut) ? dayOf(tDay) : tDay.toISODate(), at: tDay.toMillis(), opened: openAt ? openAt.toMillis() : null,
       timed: !!(tIn || tOut), pnl_cents: cents, fee_cents: Math.round(feesTotal * 100), held: tIn && tOut ? duration(tOut.toMillis() - tIn.toMillis()) : durMs ? duration(durMs) : null,
       sideGuessed: !side,
     });

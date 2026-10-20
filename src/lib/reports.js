@@ -10,6 +10,7 @@ const { scanGuild } = require('./scanner');
 const { formatDollars } = require('./money');
 const { totalColor } = require('./format');
 const { resolveTheme } = require('./theme');
+const { todayFor } = require('./session');
 
 const GRACE_HOURS = 6;
 
@@ -27,7 +28,7 @@ function monthlyImage(guildId, year, month, settings) {
 
 /** the Appearance page's preview: today in Studio and in Night, side by side */
 function themeSwatch(guildId, settings) {
-  const today = DateTime.now().setZone(settings.timezone).toISODate();
+  const today = todayFor(settings);
   return renderThemeSwatch(dayData(guildId, today, settings.timezone, settings.currency), settings.theme || 'light');
 }
 

@@ -130,7 +130,7 @@ function dayData(guildId, isoDate, tz, symbol = '$') {
  * Every trade in a period, as a list, for /trades.
  * range: 'day' | 'week' (Mon-Sun) | 'month'; anchorISO: a date inside it (YYYY-MM-DD in tz).
  */
-function tradesData(guildId, range, tz, symbol = '$', anchorISO = DateTime.now().setZone(tz).toISODate()) {
+function tradesData(guildId, range, tz, symbol = '$', anchorISO = DateTime.now().setZone(tz).toISODate(), todayISO = DateTime.now().setZone(tz).toISODate()) {
   const a = DateTime.fromISO(anchorISO, { zone: tz });
   const start = range === 'month' ? a.startOf('month') : range === 'week' ? a.startOf('week') : a.startOf('day');
   const end = range === 'month' ? a.endOf('month') : range === 'week' ? start.plus({ days: 6 }) : start;
@@ -168,9 +168,9 @@ function tradesData(guildId, range, tz, symbol = '$', anchorISO = DateTime.now()
     ? start.setLocale('en').toFormat('cccc, LLL d').toUpperCase()
     : range === 'week' ? `${start.setLocale('en').toFormat('LLL d').toUpperCase()} – ${end.setLocale('en').toFormat(start.month === end.month ? 'd' : 'LLL d').toUpperCase()}, ${end.year}`
       : start.setLocale('en').toFormat('LLLL yyyy').toUpperCase();
-  const today = DateTime.now().setZone(tz).toISODate();
+  const today = todayISO, todayDt = DateTime.fromISO(todayISO, { zone: tz });
   const lead = range === 'day' ? (start.toISODate() === today ? 'Today' : start.setLocale('en').toFormat('cccc'))
-    : range === 'week' ? (start.toISODate() === DateTime.now().setZone(tz).startOf('week').toISODate() ? 'This week' : `Week ${start.weekNumber}`)
+    : range === 'week' ? (start.toISODate() === todayDt.startOf('week').toISODate() ? 'This week' : `Week ${start.weekNumber}`)
       : start.setLocale('en').toFormat('LLLL');
   return {
     kind: 'trades', range, start: start.toISODate(), end: end.toISODate(), label, lead, symbol,

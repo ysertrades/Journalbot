@@ -1,7 +1,9 @@
 'use strict';
 const { InteractionHandler, InteractionHandlerTypes } = require('@sapphire/framework');
 const { getSettings, saveSettings } = require('../lib/db');
-const { AttachmentBuilder } = require('discord.js');
+const { AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { PRESETS } = require('../lib/session');
+const { planRedate, redatePanel, applyRedate, MAX_PER_RUN } = require('../lib/redate');
 const { settingsPanel, simpleModal, pickPanel, SWATCH } = require('../lib/panels');
 const { listPosts } = require('../lib/posts');
 const { OUTCOMES } = require('../lib/format');
@@ -10,6 +12,7 @@ const { scanGuild, summaryText } = require('../lib/scanner');
 const { weeklyImage, monthlyImage, dailyImage, themeSwatch, postNow, reportMessage } = require('../lib/reports');
 const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 const { DateTime } = require('luxon');
+const { todayFor } = require('../lib/session');
 
 const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 const normTime = (s) => { const m = String(s).trim().match(TIME_RE); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null; };
@@ -49,6 +52,7 @@ async function handleSettings(i) {
     if (group === 'schedule' && action === 'mtime') { const t = normTime(v); if (t) saveSettings(gid, { month_time: t }); else err = 'Use 24h time like `17:00`.'; }
     if (group === 'schedule' && action === 'tz') { if (validTz(v)) saveSettings(gid, { timezone: v }); else err = 'Unknown timezone. Use an IANA name like `America/New_York`.'; }
     if (group === 'advanced' && action === 'cur') saveSettings(gid, { currency: v.slice(0, 3) || '$' });
+    if (group === 'schedule' && action === 'sess') { const t = normTime(v); if (t) saveSettings(gid, { session_start: t, session_zone: t === '00:00' ? s.session_zone : (s.session_start === '00:00' ? 'America/New_York' : s.session_zone) }); else err = 'Use 24h time like `18:00` (New York time).'; }
     if (err) return i.reply(ephemeral(card(`⚠️ ${err}`, WARN_COLOR)));
     await i.deferUpdate(); return answer(group);
   }
@@ -90,6 +94,7 @@ async function handleSettings(i) {
   const MODALS = {
     wtime: ['Weekly time', 'Post time (24h, your timezone)', s.weekly_time, '17:00', 5], mtime: ['Month-end time', 'Post time (24h, your timezone)', s.month_time, '17:00', 5],
     tz: ['Timezone', 'IANA timezone', s.timezone, 'America/New_York', 40], cur: ['Currency symbol', 'Symbol (1-3 characters)', s.currency, '$', 3],
+    sess: ['Trading day start', 'Session start (24h, New York time; 00:00 = midnight)', s.session_start, '18:00', 5],
   };
   if (action && action.startsWith('modal_')) {
     const k = action.slice(6), m = MODALS[k];
@@ -99,15 +104,33 @@ async function handleSettings(i) {
   const ids = i.values || [];
   const patch = {
     general: { forums: { forums: ids }, defforum: { default_forum_id: ids[0] || null }, repchan: { report_channel_id: ids[0] || null } },
-    schedule: { toggle_weekly: { weekly_enabled: !s.weekly_enabled }, toggle_month: { month_enabled: !s.month_enabled }, day: { weekly_day: Number(ids[0] || s.weekly_day) } },
+    schedule: { toggle_weekly: { weekly_enabled: !s.weekly_enabled }, toggle_month: { month_enabled: !s.month_enabled }, day: { weekly_day: Number(ids[0] || s.weekly_day) },
+      session: PRESETS[ids[0]] ? { session_start: PRESETS[ids[0]].start, session_zone: PRESETS[ids[0]].zone || s.session_zone, session_fold: PRESETS[ids[0]].fold } : null },
     advanced: { toggle_r: { show_r: !s.show_r }, role: { ping_role_id: ids[0] || null }, users: { allowed_users: ids } },
     look: { theme_light: { theme: 'light' }, theme_dark: { theme: 'dark' }, theme_auto: { theme: 'auto' } },
   }[page]?.[action];
   if (patch) { saveSettings(gid, patch); return answer(page); }
 
+  // the trading-day fix: a preview of what moves, then the run with live progress
+  if (page === 'schedule' && action === 'redate') return i.editReply({ components: [redatePanel(gid, s, planRedate(gid, s))], files: [], attachments: [] });
+  if (page === 'schedule' && action === 'redate_go') {
+    const moves = planRedate(gid, s);
+    const bar = (d, t) => card(`# \u{1F319} Moving trades…\n\`${'█'.repeat(Math.round((d / Math.max(1, t)) * 16))}${'░'.repeat(16 - Math.round((d / Math.max(1, t)) * 16))}\` **${d}/${t}**\n-# Each post is rewritten with its new date. Keep this open.`);
+    await i.editReply({ components: [bar(0, Math.min(moves.length, MAX_PER_RUN))] });
+    const res = await applyRedate(i.guild, s, moves, (d, t) => i.editReply({ components: [bar(d, t)] }));
+    await scanGuild(i.guild, getSettings(gid)).catch(() => {});   // hand-typed posts are re-read under the new rule
+    const lines = [`# ✅ ${res.moved + res.journalOnly} trade${res.moved + res.journalOnly === 1 ? '' : 's'} moved`];
+    if (res.journalOnly) lines.push(`-# ${res.journalOnly} could not be rewritten (plain-text or deleted posts) and moved in the journal only`);
+    if (res.failed.length) lines.push(`-# ${res.failed.length} failed: ${res.failed.slice(0, 3).join(' | ')}`);
+    if (res.left) lines.push(`-# ${res.left} more: run Fix past trades again`);
+    lines.push('-# /pnl, /trades and the reports use the new days right away.');
+    const done = card(lines.join('\n'));
+    done.addActionRowComponents(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('js:nav:schedule').setLabel('Back to schedule').setStyle(ButtonStyle.Secondary)));
+    return i.editReply({ components: [done] });
+  }
   if (page === 'look' && action === 'prev_day') {
     try {
-      const img = dailyImage(gid, DateTime.now().setZone(s.timezone).toISODate(), s);
+      const img = dailyImage(gid, todayFor(s), s);
       const msg = reportMessage(img, { ...s, ping_role_id: null });
       return i.followUp({ components: msg.components, files: msg.files, flags: 64 | 32768 });
     } catch (e) { return i.followUp(ephemeral(card(`⚠️ ${e.message}`, ERROR_COLOR))); }

@@ -20,6 +20,7 @@ const { OUTCOMES, TRADE_COLOR, buildPostBody, threadTitle, emojiToken, clip } = 
 const { formatCents, formatR } = require('./money');
 const { summaryTrade, summaryResult, summaryNotes } = require('./panels');
 const { downloadImage } = require('./poster');
+const { todayFor } = require('./session');
 
 const PER_PAGE = 10;
 const PERIODS = {
@@ -63,7 +64,7 @@ function finderState(draft) {
 
 /** [startISO, endISO] of a finder period in the server's timezone */
 function periodBounds(period, tz, now = DateTime.now().setZone(tz)) {
-  const d = now.startOf('day');
+  const d = (typeof now === 'string' ? DateTime.fromISO(now, { zone: tz }) : now).startOf('day');
   if (period === 'day') return [d.toISODate(), d.toISODate()];
   if (period === 'week') return [d.startOf('week').toISODate(), d.endOf('week').toISODate()];
   if (period === 'month') return [d.startOf('month').toISODate(), d.endOf('month').toISODate()];
@@ -98,8 +99,8 @@ function matches(r, q) {
 }
 
 /** the trades a finder state shows, plus what the period holds for the chips and symbol list */
-function findTrades(guildId, tz, st) {
-  const [start, end] = periodBounds(st.period, tz);
+function findTrades(guildId, tz, st, todayISO) {
+  const [start, end] = periodBounds(st.period, tz, todayISO || DateTime.now().setZone(tz));
   const all = editableTrades(guildId, start, end).map((e) => toRow(e, tz));
   const symbols = [...all.reduce((m, r) => m.set(r.instrument, (m.get(r.instrument) || 0) + 1), new Map())].sort((a, b) => b[1] - a[1]).map(([s]) => s);
   let rows = all.filter((r) => (st.out === 'all' || r.outcome === st.out) && (st.sym === 'all' || r.instrument === st.sym) && matches(r, st.q));
@@ -116,7 +117,7 @@ const amount = (r, sym) => (r.outcome === 'missed' ? (r.potential ? `missed · $
 /* ======================= the finder ======================= */
 function finderPanel(draft, guild, settings, { notice } = {}) {
   const st = finderState(draft), sym = settings.currency;
-  const { rows, all, symbols } = findTrades(draft.guildId, settings.timezone, st);
+  const { rows, all, symbols } = findTrades(draft.guildId, settings.timezone, st, todayFor(settings));
   if (st.sym !== 'all' && !symbols.includes(st.sym)) symbols.unshift(st.sym);   // keep a picked symbol visible even when the period has none
   const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
   st.page = Math.min(Math.max(0, st.page || 0), pages - 1);

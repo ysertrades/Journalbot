@@ -39,7 +39,7 @@ function parseText(text) {
  * Combine parsed text with forum tag outcome and thread timestamp into a PnL entry.
  * Returns null when the post has no PNL line AND is not a missed entry.
  */
-function resolveEntry(parsed, { tagOutcome = null, hintOutcome = null, createdMs, tz }) {
+function resolveEntry(parsed, { tagOutcome = null, hintOutcome = null, createdMs, tz, dayOf = null }) {
   const explicit = tagOutcome || parsed.outcome || null;                     // forum tag > heading in the text
   let outcome = explicit || hintOutcome || null;                             // > the outcome this post is the destination for
   if (parsed.pnlCents === null && explicit !== 'missed') return null;        // a message needs a PNL line or an explicit MISSED heading/tag
@@ -48,7 +48,8 @@ function resolveEntry(parsed, { tagOutcome = null, hintOutcome = null, createdMs
   if (outcome === 'win') pnl = Math.abs(pnl);
   else if (outcome === 'loss') pnl = -Math.abs(pnl);
   else if (outcome === 'missed') pnl = 0;
-  const date = parsed.dateISO || DateTime.fromMillis(createdMs, { zone: tz }).toISODate();
+  // a date written in the post wins; otherwise the trading day the post was made in (a 7 PM post is tomorrow's session)
+  const date = parsed.dateISO || (dayOf ? dayOf(createdMs) : DateTime.fromMillis(createdMs, { zone: tz }).toISODate());
   return { outcome, pnl_cents: pnl, potential_cents: parsed.potentialCents, date_local: date };
 }
 

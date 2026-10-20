@@ -311,6 +311,18 @@ function settingsPanel(page, s, healthLines) {
     c.addSectionComponents(new SectionBuilder().addTextDisplayComponents(td(`**Month-end report**\n-# Last day of each month at ${s.month_time}`))
       .setButtonAccessory(btn('js:schedule:toggle_month', s.month_enabled ? 'Enabled' : 'Disabled', s.month_enabled ? ButtonStyle.Success : ButtonStyle.Secondary)));
     c.addActionRowComponents(row(btn('js:schedule:modal_mtime', `Month-end time: ${s.month_time}`)));
+    // the trading day: when "today" rolls over, with a worked example so the rule is never a guess
+    const { PRESETS, presetOf, describe, tradingDay, sessionOf } = require('./session');
+    const ses = sessionOf(s), cur = presetOf(s);
+    const { DateTime } = require('luxon');
+    const sample = DateTime.fromObject({ year: 2026, month: 10, day: 19, hour: 19, minute: 15 }, { zone: ses.zone });   // a Monday evening
+    const lands = DateTime.fromISO(tradingDay(sample, s)).setLocale('en').toFormat('cccc');
+    c.addSeparatorComponents(sep());
+    c.addTextDisplayComponents(td(`**\u{1F319} Trading day**\n-# ${describe(s)}. ${ses.minutes ? `A trade at 7:15 PM on Monday counts for **${lands}**.` : 'A trade counts for the calendar day it was taken.'}`));
+    c.addActionRowComponents(row(new StringSelectMenuBuilder().setCustomId('js:schedule:session').setPlaceholder('When the trading day starts').setMinValues(1).setMaxValues(1)
+      .addOptions([...Object.entries(PRESETS).map(([k, p]) => ({ value: k, label: p.label, emoji: p.emoji, description: p.desc.slice(0, 100), default: cur === k })),
+        ...(cur === 'custom' ? [{ value: 'custom', label: `Custom: starts ${ses.start}`, emoji: '\u{1F552}', description: `${ses.zone}${ses.fold ? ' · weekend evenings count as Monday' : ''}`.slice(0, 100), default: true }] : [])])));
+    c.addActionRowComponents(row(btn('js:schedule:modal_sess', `Custom start: ${ses.start}`), btn('js:schedule:redate', 'Fix past trades', ButtonStyle.Primary)));
   } else {
     c.addSectionComponents(
       new SectionBuilder().addTextDisplayComponents(td(`**Currency symbol**\n-# Currently \`${s.currency}\``)).setButtonAccessory(btn('js:advanced:modal_cur', 'Edit')),

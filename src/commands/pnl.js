@@ -10,6 +10,7 @@ const { scanGuild, summaryText } = require('../lib/scanner');
 const { weeklyImage, monthlyImage, dailyImage, reportMessage } = require('../lib/reports');
 const { allForums, ledgerThreads } = require('../lib/routing');
 const { parseDateInput, formatCents } = require('../lib/money');
+const { todayFor, previousDay } = require('../lib/session');
 const { card, ephemeral, WARN_COLOR, ERROR_COLOR } = require('../lib/ui');
 
 const EDIT_NAME = 'Edit journal PnL';
@@ -45,20 +46,22 @@ class PnlCommand extends Command {
         return await show({ components: [card(summaryText(await scanGuild(interaction.guild, settings, { force: true })))] });
       }
       await scanGuild(interaction.guild, settings);
+      // 'today' is the trading session's day: after 6 PM ET it is already tomorrow's futures session
+      const today = todayFor(settings), words = { today, yesterday: previousDay(today, settings) };
       let img;
       if (sub === 'day') {
         const d = interaction.options.getString('date');
-        const iso = d ? parseDateInput(d, settings.timezone) : DateTime.now().setZone(settings.timezone).toISODate();
+        const iso = d ? parseDateInput(d, settings.timezone, words) : words.today;
         if (!iso) return await show({ components: [card('Could not read that date. Try `2026-10-14` or `yesterday`.', WARN_COLOR)] });
         img = dailyImage(interaction.guildId, iso, settings);
       } else if (sub === 'week') {
         const d = interaction.options.getString('date');
-        const iso = d ? parseDateInput(d, settings.timezone) : DateTime.now().setZone(settings.timezone).toISODate();
+        const iso = d ? parseDateInput(d, settings.timezone, words) : words.today;
         if (!iso) return await show({ components: [card('Could not read that date. Try `2026-10-14`.', WARN_COLOR)] });
         img = weeklyImage(interaction.guildId, iso, settings);
       } else {
         const m = interaction.options.getString('month');
-        const now = DateTime.now().setZone(settings.timezone);
+        const now = DateTime.fromISO(today, { zone: settings.timezone });
         const mm = m ? DateTime.fromFormat(m.trim(), 'yyyy-MM', { zone: settings.timezone }) : now;
         if (!mm.isValid) return await show({ components: [card('Could not read that month. Use `YYYY-MM`.', WARN_COLOR)] });
         img = monthlyImage(interaction.guildId, mm.year, mm.month, settings);

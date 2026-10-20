@@ -4,6 +4,9 @@ const { getSettings, getDraft, saveDraft, getPnlEntry, upsertPnl, importedHashes
 const { journalPanel, csvPreviewPanel } = require('../lib/panels');
 const { readTrades, sparkline } = require('../lib/csv-import');
 const { finderState, finderPanel, editorPanel } = require('../lib/trade-editor');
+const { tradingDay, todayFor, previousDay } = require('../lib/session');
+/** what 'today' and 'yesterday' mean in the server's trading session */
+const sessionWords = (settings) => { const today = todayFor(settings); return { today, yesterday: previousDay(today, settings) }; };
 
 const CSV_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -64,7 +67,7 @@ class JournalModals extends InteractionHandler {
       return i.isFromMessage() ? i.update(payload) : i.reply({ ...payload, ...ephemeral(payload.components[0]) });
     }
     if (p.kind === 'trade') {
-      const date = parseDateInput(val(f, 'date'), settings.timezone);
+      const date = parseDateInput(val(f, 'date'), settings.timezone, sessionWords(settings));
       if (!date) notice = '⚠️ Could not read that date. Try `today`, `yesterday` or `2026-10-16`. Other changes were saved.';
       else d.date = date;
       d.instrument = val(f, 'instrument').toUpperCase().replace(/[`\n]/g, '').slice(0, 20);
@@ -122,7 +125,7 @@ class JournalModals extends InteractionHandler {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       text = await res.text();
     } catch (e) { return back(`⚠️ Could not download the file (${e.message}). Try again.`); }
-    const r = readTrades(text, settings.timezone);
+    const r = readTrades(text, settings.timezone, (dt) => tradingDay(dt, settings));
     if (r.error) return back(`⚠️ ${r.error}`);
     const { fresh, dupes, manual, imported } = classifyTrades(i.guildId, r.trades);
     // trades imported before times, sizes and hold times were kept pick them up from this file
@@ -144,7 +147,7 @@ class JournalModals extends InteractionHandler {
     const ch = await i.guild.channels.fetch(containerId).catch(() => null);
     let created = ch?.createdTimestamp;
     if (!cur && ch && key !== containerId) created = (await ch.messages.fetch(key).catch(() => null))?.createdTimestamp;   // a trade inside a destination post
-    const date = cur?.date_local || (created ? require('luxon').DateTime.fromMillis(created, { zone: settings.timezone }).toISODate() : null);
+    const date = cur?.date_local || (created ? tradingDay(created, settings) : null);
     if (!ch || !date) return i.reply(ephemeral(card('Could not find that post.', ERROR_COLOR)));
     const outcome = cur?.outcome === 'missed' ? 'missed' : c > 0 ? 'win' : c < 0 ? 'loss' : 'be';
     upsertPnl({ thread_id: key, container_id: containerId, guild_id: i.guildId, forum_id: ch.parentId, outcome, pnl_cents: c, potential_cents: cur?.potential_cents ?? null, date_local: date, source: 'manual' });
