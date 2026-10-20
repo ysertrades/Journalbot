@@ -301,11 +301,12 @@ textarea.input { height: auto; min-height: 84px; padding: 11px 13px; resize: ver
 }
 
 /* ── smooth: pages slide in piece by piece, nothing jumps ── */
-.view.entering > * { animation: rise-in .6s var(--ease) both; animation-delay: calc(var(--i, 0) * 55ms); }
+.view.entering > * { animation: page-in .48s var(--ease) both; animation-delay: calc(var(--i, 0) * 38ms); }
 @keyframes rise-in { from { opacity: 0; transform: translateY(14px); } }
+@keyframes page-in { from { opacity: 0; transform: translateY(10px) scale(.992); filter: blur(3px); } }
 .view.entering { animation: none; }
-.view { transition: opacity .25s var(--ease), transform .3s var(--ease); }
-.view.leaving { opacity: 0; transform: translateY(-6px); }
+.view { transition: opacity .2s var(--ease), transform .3s var(--ease); }
+.view.leaving { opacity: 0; transform: translateY(-6px); transition-duration: .14s, .2s; }   /* done before the next page draws */
 .card, .kpi, .li, .tc, .day, .btn, .seg button, .nav a, .server { will-change: auto; }
 .drawer { transition: transform .55s cubic-bezier(.2, .9, .2, 1); }
 .drawer-in > * { animation: rise-in .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms + 80ms); }
