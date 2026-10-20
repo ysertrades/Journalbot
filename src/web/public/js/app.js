@@ -22,7 +22,23 @@
   const short = (v) => { const a = Math.abs(v), s = a >= 10000 ? `${Math.round(a / 1000)}k` : a >= 1000 ? `${(a / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${Math.round(a)}`; return v > 0 ? `+${s}` : v < 0 ? `−${s}` : '0'; };
   const day = (iso, f = { weekday: 'short', month: 'short', day: 'numeric' }) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', f);
   const turn = (v, n) => (!n ? 'nothing logged.' : v > 0 ? 'in the green.' : v < 0 ? 'in the red.' : 'dead flat.');
-  async function api(path, { method = 'GET', body } = {}) {
+  // reads are kept for a minute and shared while in flight, so a tab you have seen (or hovered) opens at once;
+  // any change made here clears them, like the cards. Each caller gets its own copy to change freely.
+  const reads = new Map(), READ_MS = 60000;
+  function api(path, opts = {}) {
+    if ((opts.method || 'GET') !== 'GET') { reads.clear(); return fetchApi(path, opts); }
+    if (!path.startsWith('/api/g/')) return fetchApi(path);   // who is signed in is always asked fresh
+    const hit = reads.get(path);
+    if (!hit || Date.now() - hit.t > READ_MS) {
+      const p = fetchApi(path); reads.set(path, { t: Date.now(), p });
+      p.catch(() => { if (reads.get(path)?.p === p) reads.delete(path); });
+      return p.then((d) => structuredClone(d));
+    }
+    return hit.p.then((d) => structuredClone(d));
+  }
+  /** fetch a read ahead of time (hovering a tab, idle time); errors wait for the real visit */
+  const warm = (path) => { if (S.gid) api(path).catch(() => {}); };
+  async function fetchApi(path, { method = 'GET', body } = {}) {
     const headers = { accept: 'application/json' };
     if (S.token) headers.authorization = `Bearer ${S.token}`;
     if (method !== 'GET') { headers['x-csrf'] = S.csrf || ''; headers['content-type'] = 'application/json'; forgetCards(); }   // a change makes kept cards stale
@@ -111,6 +127,11 @@
     progress(78);
     await route();
     progress(100);
+    // the other tabs' data is fetched while you look at this one, and again for a tab you point at
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1200));
+    idle(() => ['overview', 'calendar', 'trades', 'insights'].forEach((k) => warmPage(k)));
+    const ahead = (e) => { const a = e.target.closest?.('a[data-page]'); if (a) warmPage(a.dataset.page, a.getAttribute('href').split('?')[1]); };
+    ['pointerover', 'focusin', 'touchstart'].forEach((t) => $('#nav').addEventListener(t, ahead, { passive: true }));
     // the splash plays its full length even on a fast load: the bar fills, then the mark flies
     const wait = Math.max(450, SPLASH_MIN - (performance.now() - BOOT_T0));
     setTimeout(landSplash, wait);
@@ -161,15 +182,17 @@
     if (key === 'settings' && !S.guild.manage) { location.hash = '#/overview'; return; }
     if (key !== 'settings' && !S.guild.journal) { location.hash = '#/settings?tab=access'; return; }   // a manager left off the journal list still runs the bot
     const seq = ++routeSeq, view = $('#view');
+    warmPage(key, qs);   // the data is on its way while the old page fades, not after
     $$('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.page === key));
     document.body.classList.remove('nav-open');
     if ($('#drawer').classList.contains('on')) closeDrawer();
-    // the old page fades up and out; the page keeps its height so nothing below it jumps
+    // the old page and its header fade up and out together; the page keeps its height so nothing below jumps
     view.style.minHeight = `${view.offsetHeight}px`;
     view.classList.remove('entering'); view.classList.add('leaving');
-    if (scrollY > 0) scrollTo({ top: 0, behavior: 'smooth' });
-    await new Promise((r) => setTimeout(r, 180));
+    headerOut();
+    await new Promise((r) => setTimeout(r, 150));
     if (seq !== routeSeq) return;
+    if (scrollY > 0) scrollTo({ top: 0, behavior: 'instant' });   // while nothing is visible, so it never reads as a jump
     // the header keeps the old page's title until the new page is ready, then crossfades to its real one:
     // pages write their title and tools into this staging area while they load
     S.routing = seq; S.pending = { title: null, tools: document.createElement('div') };
@@ -179,6 +202,7 @@
       if (seq !== routeSeq || !view.querySelector('[data-wait]')) return;   // the page has drawn: never paint over it
       view.innerHTML = '<i data-wait hidden></i><div class="grid g-main"><div class="sk" style="height:320px"></div><div class="sk" style="height:320px"></div></div><div class="kpis">' + '<div class="sk" style="height:86px"></div>'.repeat(6) + '</div>';
       $('#page-title').innerHTML = '<span class="title-sk"></span>';   // a shimmering title while the data is slow
+      $('.crumbs').classList.remove('swap');
       view.classList.remove('leaving');
     }, 260);
     try { await page.run(view, new URLSearchParams(qs || ''), seq); }
@@ -189,16 +213,28 @@
     swapHeader(`${page.k} · ${S.guild.name}`, S.pending.title || esc(page.t), S.pending.tools);
     enter(view);
   }
-  /** the header's title, kicker and tools slide out and the new ones slide in, together with the page */
+  /** the header leaves with the old page... */
+  let headerGone = 0;
+  function headerOut() { $('.crumbs').classList.add('swap'); $('#top-tools').classList.add('swap'); headerGone = performance.now(); }
+  /** ...and arrives with the new one: no extra wait once its fade-out has finished */
   function swapHeader(kicker, title, tools) {
     const crumbs = $('.crumbs'), box = $('#top-tools');
-    crumbs.classList.add('swap'); box.classList.add('swap');
+    if (!crumbs.classList.contains('swap') && !box.classList.contains('swap')) headerOut();
     setTimeout(() => {
       $('#page-kicker').textContent = kicker; $('#page-title').innerHTML = title;
       box.innerHTML = ''; if (tools) box.append(...tools.childNodes);
       crumbs.classList.remove('swap'); box.classList.remove('swap');
-    }, 170);
+    }, Math.max(0, 160 - (performance.now() - headerGone)));
   }
+  /** what each tab reads first, so it can be fetched before the tab draws */
+  const WARM = {
+    overview: () => [`overview?range=${S.range}`],
+    calendar: (q) => [`calendar${q.get('m') ? `?month=${q.get('m')}` : ''}`],
+    trades: (q) => (q.toString() ? [] : ['trades?range=month&page=0']),
+    insights: (q) => [`insights?range=${q.get('range') || 'd90'}`],
+    settings: () => (S.guild?.manage ? ['settings'] : []),
+  };
+  const warmPage = (key, qs) => (WARM[key]?.(new URLSearchParams(qs || '')) || []).forEach((p) => warm(g(p)));
   /** a page sets its real title; while routing it waits for the swap, afterwards it crossfades in place */
   function setTitle(html) {
     if (S.routing) { S.pending.title = html; return; }
@@ -209,9 +245,10 @@
   const toolsEl = () => (S.routing ? S.pending.tools : $('#top-tools'));
   /** the new page rises in piece by piece, then lets go of the held height */
   function enter(view) {
-    [...view.children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 8)));
+    [...view.children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 6)));
+    view.style.minHeight = '';   // the new page is in the layout already (only its paint is animating): no late snap
     view.classList.remove('leaving', 'entering'); void view.offsetWidth; view.classList.add('entering');
-    setTimeout(() => { view.classList.remove('entering'); view.style.minHeight = ''; }, 1100);
+    clearTimeout(enter.t); enter.t = setTimeout(() => view.classList.remove('entering'), 900);
   }
   addEventListener('hashchange', route);
   const rangeSeg = (current, onPick, list = RANGES) => {
