@@ -153,3 +153,34 @@ test('stats and insights: the numbers a trader reads', () => {
   assert.equal(i.byHour[9].n, 2); assert.equal(i.hold.win, 11); assert.equal(i.hold.loss, 4); assert.equal(i.bySide.find((x) => x.key === 'Long').pnl, 500);
   assert.equal(data.stats([]).profitFactor, null);
 });
+
+test('live: the stamp streams at once, a change in Discord pushes a new one, a rescan with nothing new pushes nothing', async () => {
+  const t = tokenFor(), { Readable } = require('node:stream');
+  const req = Readable.from([]); Object.assign(req, { method: 'GET', url: `/api/g/${GID}/live`, headers: bearer(t), socket: { remoteAddress: '127.0.0.1' } });
+  const events = [], onClose = [];
+  const res = { statusCode: 0, headers: {}, headersSent: false, writeHead(s, h) { this.statusCode = s; this.headers = h; this.headersSent = true; },
+    write(c) { for (const m of String(c).split('\n\n')) { const d = m.split('\n').find((l) => l.startsWith('data:')); if (d) events.push(JSON.parse(d.slice(5)).stamp); } return true; },
+    end() { onClose.forEach((f) => f()); }, on(e, f) { if (e === 'close') onClose.push(f); } };
+  await handle(req, res);
+  assert.equal(res.statusCode, 200); assert.match(res.headers['content-type'], /text\/event-stream/);
+  assert.equal(events.length, 1); assert.equal(events[0], db.journalStamp(GID));
+  const wait = () => new Promise((r) => setTimeout(r, 320));
+  // the same rows written again (a rescan): no news
+  const k = `9${'0'.repeat(17)}`, row = db.getPnlEntry(k);
+  db.upsertPnl({ thread_id: k, container_id: row.container_id, guild_id: GID, forum_id: row.forum_id, outcome: row.outcome, pnl_cents: row.pnl_cents, date_local: row.date_local, source: 'scan' });
+  await wait(); assert.equal(events.length, 1);
+  // a new trade, then several at once (an import): each burst arrives as one update
+  db.upsertPnl({ thread_id: '980000000000000001', container_id: '980000000000000001', guild_id: GID, forum_id: 'F', outcome: 'win', pnl_cents: 12300, date_local: '2026-10-19', source: 'bot' });
+  await wait(); assert.equal(events.length, 2); assert.notEqual(events[1], events[0]);
+  for (let i = 2; i < 6; i++) db.upsertPnl({ thread_id: `98000000000000000${i}`, container_id: `98000000000000000${i}`, guild_id: GID, forum_id: 'F', outcome: 'win', pnl_cents: 100 * i, date_local: '2026-10-19', source: 'import' });
+  await wait(); assert.equal(events.length, 3);
+  db.deletePnl('980000000000000001'); await wait(); assert.equal(events.length, 4);
+  db.upsertPnl({ thread_id: '990000000000000001', container_id: '990000000000000001', guild_id: OTHER, forum_id: 'F', outcome: 'win', pnl_cents: 1, date_local: '2026-10-19', source: 'bot' });
+  await wait(); assert.equal(events.length, 4);   // another server's trade is not news here
+  res.end(); assert.equal(db.changes.listenerCount('change'), 0);   // a closed stream lets go
+  const st = await call('GET', `/api/g/${GID}/stamp`, { headers: bearer(t) });
+  assert.equal(st.json.stamp, db.journalStamp(GID));
+  assert.equal((await call('GET', `/api/g/${GID}/stamp`)).status, 401);
+  for (let i = 1; i < 6; i++) db.deletePnl(`98000000000000000${i}`);
+  db.deletePnl('990000000000000001');
+});

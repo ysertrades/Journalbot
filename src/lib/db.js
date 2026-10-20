@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const { EventEmitter } = require('node:events');
 
 const DB_PATH = process.env.JOURNAL_DB_PATH || path.join(process.cwd(), 'data', 'journal.sqlite');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -9,6 +10,10 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+
+// 'change' (guildId) after anything a journal page shows is written: the web journal refreshes live from it
+const changes = new EventEmitter(); changes.setMaxListeners(0);
+const changed = (guildId) => { if (guildId) changes.emit('change', String(guildId)); };
 
 // Additive, idempotent migrations (all tables prefixed so they never collide with existing bot tables).
 db.exec(`
@@ -156,6 +161,7 @@ function saveSettings(guildId, patch) {
     theme: THEMES.includes(n.theme) ? n.theme : 'light',
     session_start: /^([01]\d|2[0-3]):[0-5]\d$/.test(n.session_start || '') ? n.session_start : '18:00', session_zone: n.session_zone || 'America/New_York', session_fold: n.session_fold === false ? 0 : 1,
   });
+  changed(guildId);
   return getSettings(guildId);
 }
 
@@ -189,22 +195,31 @@ function purgeDrafts() { db.prepare('DELETE FROM journal_drafts WHERE expires_at
 
 /* ---------------- entries / pnl cache ---------------- */
 function insertEntry(e) {
-  return db.prepare(`INSERT INTO journal_entries
+  const r = db.prepare(`INSERT INTO journal_entries
     (guild_id,user_id,outcome,instrument,direction,session,setup,entry,stop,target,exit,r_multiple,pnl_cents,potential_cents,
      followed_plan,fields_json,date_local,forum_id,thread_id,message_id,image_name,created_at)
     VALUES (@guild_id,@user_id,@outcome,@instrument,@direction,@session,@setup,@entry,@stop,@target,@exit,@r_multiple,@pnl_cents,
      @potential_cents,@followed_plan,@fields_json,@date_local,@forum_id,@thread_id,@message_id,@image_name,@created_at)`).run(e);
+  changed(e.guild_id);
+  return r;
 }
 function upsertPnl(e) {
+  const was = getPnlEntry(e.thread_id);
   db.prepare(`INSERT INTO pnl_entries (thread_id,container_id,guild_id,forum_id,outcome,pnl_cents,potential_cents,date_local,source,content_hash,updated_at)
     VALUES (@thread_id,@container_id,@guild_id,@forum_id,@outcome,@pnl_cents,@potential_cents,@date_local,@source,@content_hash,@updated_at)
     ON CONFLICT(thread_id) DO UPDATE SET container_id=excluded.container_id, guild_id=excluded.guild_id, forum_id=excluded.forum_id, outcome=excluded.outcome,
      pnl_cents=excluded.pnl_cents, potential_cents=excluded.potential_cents, date_local=excluded.date_local,
      source=excluded.source, content_hash=excluded.content_hash, updated_at=excluded.updated_at`)
     .run({ potential_cents: null, content_hash: null, source: 'scan', container_id: e.thread_id, ...e, updated_at: Date.now() });
+  // a rescan rewrites every row; only a real difference is news
+  if (!was || ['outcome', 'pnl_cents', 'potential_cents', 'date_local', 'forum_id', 'guild_id'].some((k) => (was[k] ?? null) !== (e[k] ?? (k === 'potential_cents' ? null : was[k])))) changed(e.guild_id);
 }
 function getPnlEntry(threadId) { return db.prepare('SELECT * FROM pnl_entries WHERE thread_id = ?').get(threadId); }
-function deletePnl(threadId) { return db.prepare('DELETE FROM pnl_entries WHERE thread_id = ?').run(threadId).changes; }
+function deletePnl(threadId) {
+  const was = getPnlEntry(threadId), n = db.prepare('DELETE FROM pnl_entries WHERE thread_id = ?').run(threadId).changes;
+  if (n) changed(was?.guild_id);
+  return n;
+}
 function pnlBetween(guildId, startISO, endISO) {
   return db.prepare('SELECT * FROM pnl_entries WHERE guild_id=? AND date_local>=? AND date_local<=? ORDER BY date_local').all(guildId, startISO, endISO);
 }
@@ -271,12 +286,14 @@ function backfillImported(guildId, trades) {
     for (const [k, v] of Object.entries(add)) if (v && (f[k] === undefined || f[k] === null || f[k] === '')) { f[k] = v; changed = true; }
     if (changed) { upd.run(JSON.stringify(f), e.id); n += 1; }
   }
+  if (n) changed(guildId);
   return n;
 }
 /** the last import into this server: when, how many, and the latest trade it held */
 function lastImportRun(guildId) { return db.prepare('SELECT * FROM journal_import_runs WHERE guild_id = ? ORDER BY at DESC LIMIT 1').get(guildId) || null; }
 function recordImportRun(guildId, { count, lastTradeAt, file }) {
   db.prepare('INSERT INTO journal_import_runs (guild_id, at, count, last_trade_at, file) VALUES (?,?,?,?,?)').run(guildId, Date.now(), count, lastTradeAt || null, file || null);
+  changed(guildId);
 }
 /**
  * Trades already in the journal on these days that did NOT come from an import
@@ -308,6 +325,7 @@ function updateEntry(id, e) {
   db.prepare(`UPDATE journal_entries SET instrument=@instrument, direction=@direction, session=@session, setup=@setup, entry=@entry, stop=@stop,
     target=@target, exit=@exit, r_multiple=@r_multiple, pnl_cents=@pnl_cents, potential_cents=@potential_cents, followed_plan=@followed_plan,
     fields_json=@fields_json, date_local=@date_local, image_name=@image_name WHERE id=@id`).run({ ...e, id });
+  changed(getEntry(id)?.guild_id);
 }
 function pnlRowsForForum(guildId, forumId) {
   return db.prepare('SELECT thread_id, container_id FROM pnl_entries WHERE guild_id=? AND forum_id=?').all(guildId, forumId);
@@ -315,7 +333,12 @@ function pnlRowsForForum(guildId, forumId) {
 function pnlKeysForContainer(containerId) {
   return db.prepare('SELECT thread_id FROM pnl_entries WHERE container_id=?').all(containerId).map((r) => r.thread_id);
 }
-function deletePnlByContainer(containerId) { return db.prepare('DELETE FROM pnl_entries WHERE container_id = ?').run(containerId).changes; }
+function deletePnlByContainer(containerId) {
+  const g = db.prepare('SELECT guild_id FROM pnl_entries WHERE container_id = ? LIMIT 1').get(containerId)?.guild_id;
+  const n = db.prepare('DELETE FROM pnl_entries WHERE container_id = ?').run(containerId).changes;
+  if (n) changed(g);
+  return n;
+}
 
 /* ---------------- report log ---------------- */
 function claimReport(guildId, kind, periodKey) {
@@ -337,5 +360,5 @@ function getReport(guildId, kind, periodKey) {
   return db.prepare('SELECT * FROM report_log WHERE guild_id=? AND kind=? AND period_key=?').get(guildId, kind, periodKey);
 }
 
-module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
+module.exports = { db, changes, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
   insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, entriesForKeys, publicCounts, journalStamp, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
