@@ -11,6 +11,7 @@ const {
 } = require('discord.js');
 const { DateTime } = require('luxon');
 const { tradesData } = require('./pnl');
+const { todayFor } = require('./session');
 const { renderTrades } = require('./renderer');
 const { resolveTheme } = require('./theme');
 const { formatDollars } = require('./money');
@@ -43,8 +44,8 @@ function pickerPanel() {
  */
 function tradesMessage(guildId, settings, range, page = 0, anchor = null) {
   const tz = settings.timezone;
-  const day = anchor || DateTime.now().setZone(tz).toISODate();
-  const data = tradesData(guildId, range, tz, settings.currency, day);
+  const today = todayFor(settings), day = anchor || today;   // the trading session's today
+  const data = tradesData(guildId, range, tz, settings.currency, day, today);
   const img = renderTrades(data, page, { theme: resolveTheme(settings) });
   const name = `trades-${range}-${data.start}-p${img.page + 1}.png`;
   const c = new ContainerBuilder().setAccentColor(data.count ? totalColor(data.net) : NEUTRAL_COLOR);

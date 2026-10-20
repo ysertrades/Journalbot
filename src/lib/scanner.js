@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const { ChannelType } = require('discord.js');
 const { parseText, resolveEntry, tagToOutcome } = require('./parse');
+const { tradingDay } = require('./session');
 const { extractText } = require('./text');
 const { allForums, ledgerThreads } = require('./routing');
 const { upsertPnl, getPnlEntry, deletePnl, pnlRowsForForum, pnlKeysForContainer } = require('./db');
@@ -12,12 +13,12 @@ const MAX_LEDGER_PAGES = 100;   // 10,000 messages per post
 
 /** Scan one message that may hold a journal entry. Used for both starter messages and messages inside destination posts. */
 function scanText({ key, container, forumId, guildId, text, tagOutcome, createdMs, hintOutcome, settings, force }) {
-  const h = hash(`${text}|${tagOutcome || hintOutcome}|${settings.timezone}`);
+  const h = hash(`${text}|${tagOutcome || hintOutcome}|${settings.timezone}|${settings.session_start}${settings.session_fold ? 'f' : ''}`);
   const existing = getPnlEntry(key);
   if (existing && existing.source === 'manual' && !force) return 'unchanged';        // manual edits via the context menu are kept
   if (!force && existing && existing.content_hash === h) return 'unchanged';
   if (!text && existing && existing.source === 'bot') return 'unchanged';           // cannot read content (missing intent): keep bot-made data
-  const entry = resolveEntry(parseText(text), { tagOutcome, hintOutcome, createdMs, tz: settings.timezone });
+  const entry = resolveEntry(parseText(text), { tagOutcome, hintOutcome, createdMs, tz: settings.timezone, dayOf: (ms) => tradingDay(ms, settings) });
   if (!entry) { if (existing) deletePnl(key); return 'unparsed'; }
   upsertPnl({ thread_id: key, container_id: container, guild_id: guildId, forum_id: forumId, ...entry, source: existing?.source === 'manual' ? 'manual' : (existing?.source || 'scan'), content_hash: h });
   return 'updated';

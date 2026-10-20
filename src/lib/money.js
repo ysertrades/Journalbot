@@ -64,13 +64,16 @@ function formatR(r, outcome) {
 }
 
 const DATE_FORMATS = ['yyyy-MM-dd', 'd MMM yyyy', 'd MMMM yyyy', 'MMM d yyyy', 'MMM d, yyyy', 'MMMM d yyyy', 'M/d/yyyy', 'd MMM', 'MMM d', 'M/d'];
-/** Returns 'YYYY-MM-DD' (in tz) or null */
-function parseDateInput(input, tz) {
+/**
+ * Returns 'YYYY-MM-DD' (in tz) or null. today / yesterday: the trading days those words mean (from
+ * session.js, so 'today' at 7 PM is tomorrow's futures session); the calendar is used when not given.
+ */
+function parseDateInput(input, tz, { today = null, yesterday = null } = {}) {
   const s = String(input || '').trim();
   if (!s) return null;
   const now = DateTime.now().setZone(tz);
-  if (/^today$/i.test(s)) return now.toISODate();
-  if (/^yesterday$/i.test(s)) return now.minus({ days: 1 }).toISODate();
+  if (/^today$/i.test(s)) return today || now.toISODate();
+  if (/^yesterday$/i.test(s)) return yesterday || now.minus({ days: 1 }).toISODate();
   for (const f of DATE_FORMATS) {
     let d = DateTime.fromFormat(s, f, { zone: tz, locale: 'en' });
     if (d.isValid) {
