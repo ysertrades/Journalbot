@@ -12,6 +12,8 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/base.css?v=__V__">
   <link rel="stylesheet" href="/css/landing.css?v=__V__">
+  <!-- the curtain is the very first paint, before any stylesheet arrives: the page never flashes under it -->
+  <style>html{background:#0b0c0e}.intro{position:fixed;inset:0;z-index:100;background:#0b0c0e}.intro.gone{display:none}</style>
 </head>
 <body>
   <!-- the intro: the open. Removed at once for returning visitors and reduced motion (landing.js). -->
@@ -23,7 +25,6 @@
         <path d="M0 92 C40 90 70 74 110 78 S180 96 220 70 S290 44 330 56 S400 34 440 26 S530 22 600 8"/><circle class="halo" cx="600" cy="8" r="6" fill="#3ccf7a"/><circle class="end" cx="600" cy="8" r="6"/></svg>
       <div class="intro-word">Market open.</div>
     </div>
-    <button class="intro-skip" id="intro-skip" type="button">Skip</button>
   </div>
   <nav class="nav" aria-label="Main">
     <a class="brand" href="#top"><img src="/favicon.svg" alt="" width="26" height="26">YSER <em>journal</em></a>
@@ -53,7 +54,7 @@
       </div>
 
       <!-- the stage: dark cards floating over a tilted floor -->
-      <div class="stage reveal" style="--d:.1s" aria-hidden="true">
+      <div class="stage reveal pre" style="--d:.1s" aria-hidden="true">
         <div class="plane" id="plane">
           <div class="card c1"><span class="k">TODAY</span><span class="v win">+$2,150</span><span class="spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
           <div class="card c2"><span class="k">WIN RATE</span><span class="v">71%</span><span class="ring"></span></div>

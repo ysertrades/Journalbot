@@ -229,6 +229,13 @@ function entriesForKeys(keys) {
   for (const k of keys) { const r = byMsg.get(k) || byThread.get(k); if (r) out[k] = r; }
   return out;
 }
+/** changes whenever a server's trades or settings change: a cache key for drawn cards */
+function journalStamp(guildId) {
+  const p = db.prepare('SELECT COUNT(*) AS n, MAX(updated_at) AS u, SUM(pnl_cents) AS s FROM pnl_entries WHERE guild_id = ?').get(guildId);
+  const e = db.prepare('SELECT MAX(id) AS i FROM journal_entries WHERE guild_id = ?').get(guildId);
+  const s = getSettings(guildId);
+  return `${p.n}:${p.u}:${p.s}:${e.i}:${s.theme}:${s.currency}:${s.timezone}:${s.session_start}:${s.session_fold}:${s.show_r}`;
+}
 /** counts for the public landing page: servers with a journal, trades logged */
 function publicCounts() {
   return { trades: db.prepare("SELECT COUNT(*) AS n FROM pnl_entries WHERE outcome != 'missed'").get().n, journals: db.prepare('SELECT COUNT(DISTINCT guild_id) AS n FROM pnl_entries').get().n };
@@ -331,4 +338,4 @@ function getReport(guildId, kind, periodKey) {
 }
 
 module.exports = { db, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
-  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, entriesForKeys, publicCounts, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
+  insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, entriesForKeys, publicCounts, journalStamp, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };

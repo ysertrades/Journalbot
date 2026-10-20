@@ -8,6 +8,8 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/base.css?v=__V__">
   <link rel="stylesheet" href="/css/app.css?v=__V__">
+  <!-- the splash is the first paint, so nothing flashes before it -->
+  <style>html{background:#0b0c0e}.splash{position:fixed;inset:0;z-index:95;background:#0b0c0e}.splash.gone{display:none}</style>
 </head>
 <body class="booting">
   <!-- the intro: the mark waits here while the journal loads, then flies into the sidebar -->

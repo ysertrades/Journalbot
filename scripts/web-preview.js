@@ -22,7 +22,26 @@ const guild = {
   id: GID, name: 'YSER Trading', iconURL: () => null,
   channels: { cache: new Map([ch('900000000000000001', 'wins', 15), ch('900000000000000002', 'losses', 15), ch('900000000000000003', 'breakeven', 15), ch('900000000000000004', 'pnl', 0)]), fetch: async () => null },
   roles: { cache: new Map([['800000000000000001', { id: '800000000000000001', name: 'Traders', managed: false, position: 2, hexColor: '#5865f2' }]]) },
+  members: {
+    me: null,
+    fetch: async (id) => ({ id, displayName: id === '222222222222222222' ? 'Yasser' : 'Trader', user: { id, username: 'trader', globalName: 'Trader', bot: false }, displayAvatarURL: () => null }),
+    search: async ({ query }) => new Map([['333333333333333333', { displayName: `${query} Lab`, user: { id: '333333333333333333', username: query.toLowerCase(), bot: false }, displayAvatarURL: () => null }]]),
+  },
+  _active: async () => ({ threads: new Map([['700000000000000001', { id: '700000000000000001', name: 'Wins ledger', parentId: '900000000000000001', createdTimestamp: 2 }], ['700000000000000002', { id: '700000000000000002', name: 'October wins', parentId: '900000000000000001', createdTimestamp: 1 }]]) }),
 };
+guild.channels.cache.get('900000000000000001').availableTags = [{ id: 't1', name: 'Win' }];
+for (const id of ['900000000000000001', '900000000000000002', '900000000000000003']) {
+  const ch = guild.channels.cache.get(id);
+  ch.availableTags ||= [];
+  ch.threads = { fetchArchived: async () => ({ threads: new Map(), hasMore: false }) };
+  ch.setAvailableTags = async (tags) => { ch.availableTags = tags.map((t, i) => ({ id: t.id || `n${i}`, name: t.name })); };
+}
+guild.channels.fetch = async (id) => {   // forums from the cache, posts from the active threads, like Discord
+  if (guild.channels.cache.has(id)) return guild.channels.cache.get(id);
+  const t = (await guild._active()).threads.get(id);
+  return t ? { ...t, parent: guild.channels.cache.get(t.parentId), isThread: () => true } : null;
+};
+guild.channels.fetchActiveThreads = guild._active;
 const client = { guilds: { cache: new Map([[GID, guild]]) }, isReady: () => true, logger: console, user: { id: 'bot' } };
 db.saveSettings(GID, { outcome_forums: { win: '900000000000000001', loss: '900000000000000002', be: '900000000000000003' }, report_channel_id: '900000000000000004', theme: 'dark' });
 
