@@ -1,9 +1,13 @@
 'use strict';
 require('dotenv').config();
-const { SapphireClient, LogLevel } = require('@sapphire/framework');
+const { SapphireClient, LogLevel, ApplicationCommandRegistries, RegisterBehavior } = require('@sapphire/framework');
 const { GatewayIntentBits, Partials } = require('discord.js');
 
 if (!process.env.DISCORD_TOKEN) { console.error('DISCORD_TOKEN is missing. Copy .env.example to .env and fill it in.'); process.exit(1); }
+
+// On every start Discord's command list is replaced with exactly the commands in src/commands, so a
+// command removed from the code (like /account) also disappears from Discord instead of lingering.
+ApplicationCommandRegistries.setDefaultBehaviorWhenNotIdentical(RegisterBehavior.BulkOverwrite);
 
 const client = new SapphireClient({
   intents: [
