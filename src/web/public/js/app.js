@@ -65,7 +65,9 @@
     const t = document.createElement('div'); t.className = `toast ${kind}`;
     t.innerHTML = `<span class="ti">${kind === 'ok' ? '✓' : kind === 'err' ? '!' : 'i'}</span><span>${text}</span>`;
     $('#toasts').appendChild(t);
-    setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, ms);
+    t.close = () => { if (t.classList.contains('out')) return; t.classList.add('out'); setTimeout(() => t.remove(), 400); };
+    setTimeout(t.close, ms);
+    return t;
   }
   const busy = (btn, on) => { if (btn) btn.classList.toggle('busy', on); };
   const countUp = (node, to, fmt) => {
@@ -481,6 +483,19 @@
         <select class="select" id="f-lens"><option value="">Newest first</option><option value="big" ${st.lens === 'big' ? 'selected' : ''}>Biggest first</option><option value="nochart" ${st.lens === 'nochart' ? 'selected' : ''}>Missing a chart</option><option value="nonotes" ${st.lens === 'nonotes' ? 'selected' : ''}>Missing notes</option></select>
         <input class="input search" id="f-q" placeholder="Search: NQ short, orb, 1240, friday…" value="${esc(st.q)}">
       </div></section><section class="card" id="tbl-card"><div class="sk" style="height:300px"></div></section>`;
+    // what the ledger shows right now, as filters: the export and the clear act on exactly this
+    const filters = () => { const p = new URLSearchParams({ range: st.range }); for (const k of ['from', 'to', 'outcome', 'symbol', 'lens', 'q']) if (st[k]) p.set(k, st[k]); return p; };
+    const tools = toolsEl();
+    const exp = document.createElement('button'); exp.type = 'button'; exp.className = 'btn sm tool-io'; exp.setAttribute('aria-label', 'Export these trades as CSV'); exp.title = 'Export these trades as CSV';
+    exp.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg><span>Export CSV</span>';
+    exp.addEventListener('click', () => exportCsv(filters(), exp));
+    tools.append(exp);
+    if (S.guild.manage) {
+      const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'btn sm danger tool-io'; clr.setAttribute('aria-label', 'Delete these trades'); clr.title = 'Delete these trades';
+      clr.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg><span>Delete…</span>';
+      clr.addEventListener('click', () => clearLedger(filters(), RANGE_WORD[st.range] || 'these filters'));
+      tools.append(clr);
+    }
     const load = async () => {
       const p = new URLSearchParams({ range: st.range, page: st.page }); for (const k of ['from', 'to', 'outcome', 'symbol', 'lens', 'q']) if (st[k]) p.set(k, st[k]);
       const d = await api(g(`trades?${p}`)); if (seq !== routeSeq) return;
@@ -515,6 +530,130 @@
     let tmr; $('#f-q').addEventListener('input', (e) => { clearTimeout(tmr); tmr = setTimeout(() => { st.q = e.target.value.trim(); re(); }, 260); });
     S.reload = { seq, fn: load };   // a live update reloads the ledger with your filters and page kept
     await load();
+  }
+
+  /* ---------- the ledger, out: a CSV, and a clear you can take back ---------- */
+  const authed = () => ({ headers: S.token ? { authorization: `Bearer ${S.token}` } : {}, credentials: 'same-origin' });
+  /** downloads the trades under these filters; the button packs, a file chip flies off, the toast names it */
+  async function exportCsv(params, btn) {
+    if (btn?.classList.contains('packing')) return null;
+    const label = btn?.querySelector('span'), was = label?.textContent;
+    btn?.classList.add('packing'); if (label) label.textContent = 'Packing…';
+    try {
+      const res = await fetch(g(`export?${params}`), authed());
+      if (res.status === 401) { showGate(); throw new Error('Signed out'); }
+      if (!res.ok) throw new Error('Could not export those trades');
+      const n = Number(res.headers.get('x-trades') || 0), name = res.headers.get('x-filename') || 'journal.csv';
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if (btn) { btn.classList.add('saved'); if (label) label.textContent = `${n} saved`; flyFile(btn, name); }
+      toast(`Saved <b>${esc(name)}</b> · ${n} trade${n === 1 ? '' : 's'}`);
+      return { name, n };
+    } catch (e) { toast(esc(e.message), 'err'); return null; }
+    finally { setTimeout(() => { btn?.classList.remove('packing', 'saved'); if (label) label.textContent = was; }, 1800); }
+  }
+  function flyFile(from, name) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = from.getBoundingClientRect(), f = document.createElement('div');
+    f.className = 'fly-file'; f.innerHTML = `<b>CSV</b><span>${esc(name.length > 26 ? `${name.slice(0, 24)}…` : name)}</span>`;
+    f.style.left = `${r.left + r.width / 2}px`; f.style.top = `${r.top + r.height / 2}px`;
+    document.body.append(f); setTimeout(() => f.remove(), 1300);
+  }
+
+  /** the clear: see what goes, choose how far, save a backup, type delete, hold, and it can still be undone */
+  async function clearLedger(params, rangeWord) {
+    drawer('<div class="drawer-h"><div><span class="kicker">Clear the ledger</span><h2>Counting…</h2></div><button class="btn icon ghost" data-close>✕</button></div><div class="sk" style="height:240px"></div>');
+    let p;
+    try { p = await api(g(`clear?${params}`)); } catch (e) { $('#drawer-in').insertAdjacentHTML('beforeend', `<div class="empty">${esc(e.message)}</div>`); return; }
+    const box = $('#drawer-in'); if (!box) return;
+    const filtered = [...params.keys()].some((k) => k !== 'range'), span = p.first ? (p.first === p.last ? esc(day(p.first)) : `${esc(day(p.first))} – ${esc(day(p.last))}`) : '';
+    const max = Math.max(1, ...p.spark.map((v) => Math.abs(v)));
+    const bars = p.spark.slice(-120).map((v, i) => `<i class="${v > 0 ? 'w' : v < 0 ? 'l' : 'b'}" style="--h:${Math.max(8, Math.round((Math.abs(v) / max) * 100))}%;--i:${i}"></i>`).join('');
+    const batches = p.batches.map((b) => `<div class="cl-batch" data-batch="${esc(b.id)}"><span><b>${b.n} trade${b.n === 1 ? '' : 's'}</b> <span class="${tone(b.net)}">${money(b.net)}</span><small>${esc(new Date(b.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${b.byMe ? ' · by you' : ''}</small></span><button class="btn sm" data-restore="${esc(b.id)}">Bring back</button></div>`).join('');
+    box.innerHTML = `<div class="drawer-h"><div><span class="kicker">Clear the ledger · ${esc(filtered ? 'the trades these filters show' : rangeWord.toLowerCase())}</span>
+        <h2>${p.count} trade${p.count === 1 ? '' : 's'}, <em class="${tone(p.net)}">${p.count ? money(p.net) : 'nothing here'}</em></h2></div><button class="btn icon ghost" data-close>✕</button></div>
+      ${p.count ? `<div class="cl-strip" id="cl-strip" aria-hidden="true">${bars}</div>
+      <div class="cl-meta"><span>${span}</span><span>${p.wins}W · ${p.losses}L</span></div>
+      <div class="cl-opts" role="radiogroup">
+        <label class="cl-opt on"><input type="radio" name="cl-how" value="journal" checked><span class="cl-dot"></span><span><b>Remove from the journal</b><small>Totals, the calendar and the cards forget them. Every post stays in Discord, and you can bring them back.</small></span></label>
+        <label class="cl-opt hot"><input type="radio" name="cl-how" value="discord"><span class="cl-dot"></span><span><b>Also delete the bot's posts</b><small>Deletes the ${p.botPosted} post${p.botPosted === 1 ? '' : 's'} the bot made for these, in Discord. Permanent. Anything members wrote is never touched.</small></span></label>
+      </div>
+      <label class="cl-backup"><button type="button" class="switch on" id="cl-backup" aria-pressed="true"></button><span><b>Save a CSV backup first</b><small>Re-import it any time from the Import tab.</small></span></label>
+      <div class="cl-go">
+        <input class="input" id="cl-word" placeholder="Type delete" autocomplete="off" spellcheck="false" aria-label="Type delete to confirm">
+        <button class="btn hold" id="cl-hold" type="button" disabled><i class="hold-fill"></i><span>Hold to clear ${p.count}</span></button>
+      </div>` : '<div class="empty">Nothing matches these filters.</div>'}
+      ${batches ? `<div class="cl-recent"><span class="kicker">Recently cleared</span>${batches}</div>` : ''}`;
+    [...box.children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 8)));
+    $$('[data-close]', box).forEach((b) => b.addEventListener('click', closeDrawer));
+    $$('.cl-opt', box).forEach((o) => o.addEventListener('change', () => {
+      $$('.cl-opt', box).forEach((x) => x.classList.toggle('on', x.querySelector('input').checked));
+      $('#cl-hold span', box).textContent = `Hold to ${$('input[value="discord"]', box).checked ? 'delete' : 'clear'} ${p.count}`;
+    }));
+    $('#cl-backup', box)?.addEventListener('click', (e) => { const on = !e.currentTarget.classList.contains('on'); e.currentTarget.classList.toggle('on', on); e.currentTarget.setAttribute('aria-pressed', String(on)); });
+    const word = $('#cl-word', box), hold = $('#cl-hold', box);
+    word?.addEventListener('input', () => { const ok = word.value.trim().toLowerCase() === 'delete'; hold.disabled = !ok; word.classList.toggle('ok', ok); });
+    $$('[data-restore]', box).forEach((b) => b.addEventListener('click', () => restoreBatch(b.dataset.restore, b)));
+    if (!hold) return;
+    // hold, don't click: the button fills over a moment and lets go if you do
+    let t0 = 0, raf = 0, fired = false;
+    const fill = $('.hold-fill', hold), HOLD = 1300;
+    const tick = (t) => { const k = Math.min(1, (t - t0) / HOLD); fill.style.transform = `scaleX(${k})`; if (k >= 1) { fired = true; go(); } else raf = requestAnimationFrame(tick); };
+    const down = (e) => { if (hold.disabled || fired) return; e.preventDefault(); hold.classList.add('holding'); t0 = performance.now(); raf = requestAnimationFrame(tick); };
+    const up = () => { if (fired) return; cancelAnimationFrame(raf); hold.classList.remove('holding'); fill.style.transform = 'scaleX(0)'; };
+    hold.addEventListener('pointerdown', down); ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => hold.addEventListener(ev, up));
+    hold.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) down(e); });
+    hold.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') up(); });
+    async function go() {
+      hold.classList.add('busy'); $('span', hold).textContent = 'Clearing…';
+      const discord = $('input[value="discord"]', box).checked;
+      if ($('#cl-backup', box).classList.contains('on')) {
+        const saved = await exportCsv(params, null);
+        if (!saved) { hold.classList.remove('busy', 'holding'); fill.style.transform = 'scaleX(0)'; fired = false; $('span', hold).textContent = `Hold to clear ${p.count}`; toast('The backup did not save, so nothing was cleared.', 'err'); return; }
+      }
+      let r;
+      try { r = await api(g('action/clear'), { method: 'POST', body: { confirm: word.value, query: params.toString(), expect: p.count, discord } }); }
+      catch (e) { toast(esc(e.message), 'err'); hold.classList.remove('busy', 'holding'); fill.style.transform = 'scaleX(0)'; fired = false; $('span', hold).textContent = `Hold to clear ${p.count}`; return; }
+      // the strip shreds, the drawer closes, the ledger's rows fold away, then it redraws empty
+      $('#cl-strip', box)?.classList.add('shred');
+      await new Promise((ok) => setTimeout(ok, 650));
+      closeDrawer();
+      const rows = $$('#tbl-card .tc, #tbl-card tr.row').slice(0, 40);
+      rows.forEach((n, i) => { n.style.setProperty('--i', i); n.classList.add('fold'); });
+      await new Promise((ok) => setTimeout(ok, rows.length ? 520 : 0));
+      await reloadHere();
+      const t = toast(`Cleared ${r.cleared} trade${r.cleared === 1 ? '' : 's'} · <span class="${tone(r.net)}">${money(r.net)}</span> <button class="btn sm undo" type="button">Undo</button>`, 'ok', 12000);
+      $('.undo', t).addEventListener('click', () => { t.close(); restoreBatch(r.batch); });
+      if (r.job) watchClearJob(r.job, r.total);
+    }
+  }
+  async function reloadHere() { reads.clear(); forgetCards(); if (S.reload?.seq === routeSeq) await S.reload.fn(); else await route(); }
+  async function restoreBatch(batch, btn) {
+    busy(btn, true);
+    try {
+      const r = await api(g('action/restore'), { method: 'POST', body: { batch } });
+      closeDrawer(); await reloadHere();
+      toast(`Brought back ${r.restored} trade${r.restored === 1 ? '' : 's'}`);
+    } catch (e) { toast(esc(e.message), 'err'); }
+    busy(btn, false);
+  }
+  /** the Discord half runs on the server: a live toast counts the posts down */
+  async function watchClearJob(id, total) {
+    const t = toast(`<span class="job-line">Deleting the bot's posts in Discord · <b class="job-n">0</b> / ${total}</span><i class="job-bar"><i></i></i>`, 'info', 10 * 60000);
+    for (;;) {
+      await new Promise((ok) => setTimeout(ok, 800));
+      let j; try { j = await api(g(`jobs/${id}`)); } catch { break; }
+      $('.job-n', t) && ($('.job-n', t).textContent = j.done);
+      $('.job-bar i', t)?.style.setProperty('transform', `scaleX(${total ? j.done / total : 1})`);
+      if (j.state !== 'running') {
+        t.close();
+        const x = j.result || {};
+        if (j.state === 'failed') toast(esc(j.error || 'Deleting the posts stopped.'), 'err', 9000);
+        else toast(`Deleted ${x.deleted} post${x.deleted === 1 ? '' : 's'} in Discord${x.kept ? ` · ${x.kept} kept (written by members, still restorable)` : ''}${x.failed?.length ? ` · ${x.failed.length} failed: ${esc(x.failed[0])}` : ''}`, x.failed?.length ? 'err' : 'ok', 9000);
+        return;
+      }
+    }
   }
 
   /* ---------- one trade: read it, edit it ---------- */

@@ -48,6 +48,44 @@ function tradesBetween(guildId, start, end, settings) {
   }).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.at || 0) - (b.at || 0)));
 }
 
+/**
+ * The ledger's filters (range, outcome, symbol, lens, search), in one place: the trades tab, its CSV export and
+ * clearing all act on exactly the same trades. Newest first; `all` is the period before the other filters.
+ */
+function filterTrades(guildId, q, settings) {
+  const [start, end] = rangeBounds(q.get('range') || 'month', settings, { from: q.get('from'), to: q.get('to') });
+  const all = tradesBetween(guildId, start, end, settings);
+  let list = all.slice().reverse();
+  const out = q.get('outcome'), sym = (q.get('symbol') || '').toUpperCase(), lens = q.get('lens'), words = String(q.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (OUTCOMES[out]) list = list.filter((x) => x.outcome === out);
+  if (sym) list = list.filter((x) => (x.instrument || '').toUpperCase() === sym);
+  if (lens === 'nochart') list = list.filter((x) => x.editable && !x.hasChart);
+  if (lens === 'nonotes') list = list.filter((x) => x.editable && !x.hasNotes);
+  if (lens === 'big') list.sort((x, y) => Math.abs(y.pnl) - Math.abs(x.pnl));
+  if (words.length) list = list.filter((x) => { const hay = [x.instrument, x.direction, x.setup, x.session, x.date, ...Object.values(x.notes), String(Math.abs(x.pnl)), x.outcome].filter(Boolean).join(' ').toLowerCase(); return words.every((w) => hay.includes(w.replace(/[$,]/g, ''))); });
+  return { list, all, start, end };
+}
+
+/**
+ * Trades as a CSV a spreadsheet opens and this bot's own importer reads back: the column names are ones the
+ * importer knows (Trade ID keeps a re-import from doubling up), times carry their offset, and a cell that a
+ * spreadsheet would run as a formula is quoted harmless.
+ */
+function tradesCsv(list, settings) {
+  const cell = (v) => {
+    if (v === null || v === undefined) return '';
+    let s = String(v).replace(/\r?\n/g, ' ');
+    if (/^[=+\-@\t]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
+    return /[",;]/.test(s) || s !== s.trim() ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const head = ['Trade ID', 'Date', 'Exit Time', 'Symbol', 'Side', 'Qty', 'Entry Price', 'Exit Price', 'Stop', 'Target', 'Held', 'Outcome', 'PnL', 'Potential', 'R', 'Session', 'Setup', 'Followed Plan', 'Why', 'Lesson', 'Link'];
+  const rows = list.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.at || 0) - (b.at || 0))).map((t) => [
+    t.key, t.date, t.at ? DateTime.fromMillis(t.at, { zone: settings.timezone }).toISO({ suppressMilliseconds: true }) : '', t.instrument, t.direction, t.qty, t.entry, t.exit, t.stop, t.target, t.held,
+    OUTCOMES[t.outcome]?.label || t.outcome, t.outcome === 'missed' ? 0 : t.pnl.toFixed(2), t.potential != null ? t.potential.toFixed(2) : '', t.r, t.session, t.setup, t.followed, t.notes.why, t.notes.lesson, t.link,
+  ].map(cell).join(','));
+  return `﻿${[head.join(','), ...rows].join('\r\n')}\r\n`;   // the BOM tells Excel it is UTF-8
+}
+
 /** the numbers a trader looks at, for any list of trades */
 function stats(trades) {
   const c = trades.filter((t) => t.outcome !== 'missed');
@@ -130,4 +168,4 @@ function settingsView(guild, s) {
   };
 }
 
-module.exports = { rangeBounds, tradesBetween, stats, insights, calendar, settingsView, tradingDay };
+module.exports = { rangeBounds, tradesBetween, filterTrades, tradesCsv, stats, insights, calendar, settingsView, tradingDay };

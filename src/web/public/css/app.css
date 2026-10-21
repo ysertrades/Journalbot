@@ -385,3 +385,54 @@ tr.row.fresh > td { animation: fresh-row 2.6s var(--ease) both; }
 @keyframes fresh-row { 0%, 30% { background: rgba(60, 207, 122, .12); } }
 .kpi .v.bump { animation: bump .8s var(--spring); transform-origin: 0 50%; }
 @keyframes bump { 35% { transform: scale(1.07); filter: brightness(1.35); } }
+
+/* ── the ledger, out: export and clear ── */
+.tool-io svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .35s var(--spring); }
+.tool-io.packing { pointer-events: none; }
+.tool-io.packing svg { animation: pack 0.7s var(--ease) infinite; }
+@keyframes pack { 50% { transform: translateY(3px); } }
+.tool-io.saved { color: var(--win); box-shadow: inset 0 0 0 1px rgba(60, 207, 122, .45); }
+.tool-io.saved svg { transform: scale(1.15); }
+.fly-file { position: fixed; z-index: 120; display: flex; align-items: center; gap: 8px; padding: 7px 11px 7px 7px; border-radius: 12px; background: var(--panel3); box-shadow: inset 0 0 0 1px var(--line2), 0 16px 30px -14px #000;
+  font: 600 12px var(--sans); color: var(--ink); white-space: nowrap; pointer-events: none; transform: translate(-50%, -50%); animation: fly-file 1.2s var(--ease) forwards; }
+.fly-file b { padding: 4px 6px; border-radius: 7px; background: var(--win); color: #06150c; font: 700 10px var(--mono); letter-spacing: .06em; }
+@keyframes fly-file { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); } 18% { opacity: 1; transform: translate(-50%, -110%) scale(1); }
+  70% { opacity: 1; transform: translate(calc(-50% + 30px), -260%) scale(.9) rotate(-4deg); } 100% { opacity: 0; transform: translate(calc(-50% + 60px), -380%) scale(.6) rotate(-8deg); } }
+
+/* what a clear would take: one bar per trade, which shreds when it goes */
+.cl-strip { display: flex; align-items: flex-end; gap: 2px; height: 74px; padding: 10px 12px; border-radius: 16px; background: var(--floor2); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.cl-strip i { flex: 1; min-width: 2px; height: var(--h); border-radius: 2px; background: var(--grey); animation: cl-up .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 6ms); }
+.cl-strip i.w { background: var(--win); } .cl-strip i.l { background: var(--loss); }
+@keyframes cl-up { from { transform: scaleY(0); } }
+.cl-strip i { transform-origin: bottom; }
+.cl-strip.shred i { animation: cl-shred .55s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 4ms); }
+@keyframes cl-shred { 40% { transform: translateY(-6px) rotate(calc((var(--i, 0) - 60) * .4deg)); opacity: 1; } 100% { transform: translateY(70px) rotate(calc((var(--i, 0) - 60) * 1.2deg)) scaleY(.4); opacity: 0; } }
+.cl-meta { display: flex; justify-content: space-between; gap: 10px; font: 400 12px var(--mono); color: var(--grey); margin-top: 8px; }
+.cl-opts { display: grid; gap: 8px; }
+.cl-opt { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; padding: 14px; border-radius: 16px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; transition: box-shadow .25s, background-color .25s; }
+.cl-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.cl-opt b { display: block; font-size: 14.5px; } .cl-opt small { display: block; margin-top: 3px; color: var(--soft); font-size: 13px; line-height: 1.45; }
+.cl-dot { width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line2); transition: box-shadow .25s var(--spring); }
+.cl-opt.on { background: var(--panel2); box-shadow: inset 0 0 0 1.5px var(--ink2); } .cl-opt.on .cl-dot { box-shadow: inset 0 0 0 5px var(--ink); }
+.cl-opt.hot.on { box-shadow: inset 0 0 0 1.5px var(--loss); } .cl-opt.hot.on .cl-dot { box-shadow: inset 0 0 0 5px var(--loss); }
+.cl-opt:focus-within { outline: 2px solid var(--blurple); outline-offset: 2px; }
+.cl-backup { display: flex; gap: 12px; align-items: center; cursor: pointer; }
+.cl-backup b { display: block; font-size: 14px; } .cl-backup small { color: var(--soft); font-size: 12.5px; }
+.cl-go { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.cl-go .input.ok { box-shadow: inset 0 0 0 1.5px var(--loss); color: var(--loss); }
+.btn.hold { position: relative; overflow: hidden; background: var(--loss-a); color: var(--loss); box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .45); user-select: none; touch-action: none; }
+.btn.hold:disabled { opacity: .45; cursor: not-allowed; }
+.btn.hold span { position: relative; }
+.hold-fill { position: absolute; inset: 0; background: var(--loss); transform: scaleX(0); transform-origin: left; }
+.btn.hold.holding { color: #1a0707; } .btn.hold.holding span { color: #1a0707; }
+.btn.hold:not(.holding) .hold-fill { transition: transform .3s var(--ease); }
+.cl-recent { display: grid; gap: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.cl-batch { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: var(--panel); }
+.cl-batch small { display: block; color: var(--grey); font: 400 11.5px var(--mono); margin-top: 2px; }
+/* the ledger's rows fold away, one after another, before it redraws */
+.tc.fold, tr.row.fold { animation: fold .5s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 12ms); }
+@keyframes fold { to { opacity: 0; transform: translateX(-24px) scale(.97); filter: blur(2px); } }
+.toast .undo { margin-left: 6px; height: 28px; }
+.toast .job-line { display: block; } .toast .job-bar { display: block; height: 3px; margin-top: 7px; border-radius: 3px; background: var(--panel); overflow: hidden; }
+.toast .job-bar i { display: block; height: 100%; background: var(--loss); transform: scaleX(0); transform-origin: left; transition: transform .5s var(--ease); }
+@media (max-width: 560px) { .cl-go { grid-template-columns: 1fr; } .tool-io span { display: none; } .tool-io { padding: 0 10px; } }

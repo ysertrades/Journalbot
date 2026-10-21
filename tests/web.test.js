@@ -186,3 +186,53 @@ test('live: the stamp streams at once, a change in Discord pushes a new one, a r
   for (let i = 1; i < 6; i++) db.deletePnl(`98000000000000000${i}`);
   db.deletePnl('990000000000000001');
 });
+
+test('the ledger out: a CSV the importer reads back, a clear that a rescan respects and Undo brings back, the bot’s own posts deleted on request', async () => {
+  const t = tokenFor(), me = (await call('GET', '/api/me', { headers: bearer(t) })).json, w = { ...bearer(t), 'x-csrf': me.csrf };
+  db.saveSettings(GID, { allowed_users: [], currency: '$' });
+  const count = () => db.pnlBetween(GID, '0000-01-01', '9999-12-31').length, n0 = count();
+  // export: the filters apply, the file is UTF-8 for Excel, and the importer reads it back trade for trade
+  const ex = await call('GET', `/api/g/${GID}/export?range=all`, { headers: bearer(t) });
+  assert.equal(ex.status, 200); assert.match(ex.headers['content-type'], /text\/csv/); assert.match(ex.headers['content-disposition'], /attachment; filename="journal-desk-all-/);
+  assert.equal(Number(ex.headers['x-trades']), n0); assert.ok(ex.raw.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])));
+  const { readTrades } = require('../src/lib/csv-import');
+  const back = readTrades(ex.raw.subarray(3).toString('utf8'), 'America/New_York');
+  assert.equal(back.error, undefined); assert.equal(back.trades.length, n0);
+  const total = db.pnlBetween(GID, '0000-01-01', '9999-12-31').reduce((s, r) => s + r.pnl_cents, 0);
+  assert.equal(back.trades.reduce((s, x) => s + x.pnl_cents, 0), total);
+  assert.equal(Number((await call('GET', `/api/g/${GID}/export?range=all&symbol=NQ`, { headers: bearer(t) })).headers['x-trades']), 3);
+  // a note a spreadsheet would run as a formula is written harmless
+  const csv = data.tradesCsv([{ key: '1', date: '2026-10-12', at: null, instrument: 'NQ', direction: 'Long', qty: null, entry: null, exit: null, stop: null, target: null, held: null, outcome: 'win', pnl: 10, potential: null, r: null, session: null, setup: null, followed: null, notes: { why: '=HYPERLINK("x")', lesson: 'a, b' }, link: 'l' }], db.getSettings(GID));
+  assert.match(csv, /"'=HYPERLINK\(""x""\)"/); assert.match(csv, /"a, b"/);
+  // clearing needs Manage Server, the word, and the count it was shown
+  const member = tokenFor({ g: [{ id: GID, m: 0 }] }); db.saveSettings(GID, { allowed_users: ['222222222222222222'] });
+  assert.equal((await call('GET', `/api/g/${GID}/clear?range=all`, { headers: bearer(member) })).status, 403);
+  db.saveSettings(GID, { allowed_users: [] });
+  const pv = (await call('GET', `/api/g/${GID}/clear?range=all&symbol=ES`, { headers: bearer(t) })).json;
+  assert.equal(pv.count, 3); assert.equal(pv.spark.length, 3);
+  assert.equal((await call('POST', `/api/g/${GID}/action/clear`, { headers: w, body: { query: 'range=all&symbol=ES', confirm: 'yes' } })).status, 400);
+  assert.equal((await call('POST', `/api/g/${GID}/action/clear`, { headers: w, body: { query: 'range=all&symbol=ES', confirm: 'delete', expect: 2 } })).status, 409);
+  const cl = (await call('POST', `/api/g/${GID}/action/clear`, { headers: w, body: { query: 'range=all&symbol=ES', confirm: 'DELETE', expect: 3 } })).json;
+  assert.equal(cl.cleared, 3); assert.equal(count(), n0 - 3);
+  assert.equal((await call('GET', `/api/g/${GID}/trades?range=all&symbol=ES`, { headers: bearer(t) })).json.total, 0);
+  // a rescan of a cleared trade's message leaves it out of the journal
+  const { scanLedgerMessage } = require('../src/lib/scanner');
+  const k = `9${'0'.repeat(17)}`;
+  assert.equal(scanLedgerMessage({ id: k, parentId: 'F', guildId: GID }, { id: k, content: 'RESULT: WIN\nPNL: +$500', createdTimestamp: Date.now() }, db.getSettings(GID)), 'unchanged');
+  assert.equal(db.getPnlEntry(k), undefined); assert.ok(db.isArchived(k));
+  assert.equal((await call('GET', `/api/g/${GID}/clear?range=all`, { headers: bearer(t) })).json.batches[0].n, 3);
+  // Undo puts every one back
+  assert.equal((await call('POST', `/api/g/${GID}/action/restore`, { headers: w, body: { batch: cl.batch } })).json.restored, 3);
+  assert.equal(count(), n0); assert.ok(!db.isArchived(k));
+  // and with Discord: only posts the bot made are deleted; a member's post stays, cleared but restorable
+  const realFetch = guild.channels.fetch, deleted = [];
+  client.user = { id: '444444444444444444' };
+  guild.channels.fetch = async (id) => ({ id, ownerId: Number(id.slice(-1)) % 2 ? 'member' : client.user.id, delete: async () => { deleted.push(id); } });
+  const cd = (await call('POST', `/api/g/${GID}/action/clear`, { headers: w, body: { query: 'range=all&symbol=ES', confirm: 'delete', expect: 3, discord: true } })).json;
+  assert.ok(cd.job); assert.equal(cd.total, 3);
+  let job; for (let i = 0; i < 50; i++) { job = (await call('GET', `/api/g/${GID}/jobs/${cd.job}`, { headers: bearer(t) })).json; if (job.state !== 'running') break; await new Promise((r) => setTimeout(r, 20)); }
+  assert.equal(job.state, 'done'); assert.equal(job.result.deleted, deleted.length); assert.equal(job.result.deleted + job.result.kept, 3); assert.ok(job.result.deleted >= 1);
+  for (const id of deleted) assert.ok(!db.isArchived(id));   // gone from Discord: nothing left to restore
+  assert.equal(db.restoreArchive(GID, cd.batch), job.result.kept);
+  guild.channels.fetch = realFetch; delete client.user;
+});

@@ -142,18 +142,29 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
     }
     if (area === 'trades' && req.method === 'GET' && !a1) {
       const ctx = await guildCtx(req, res, gid); if (!ctx) return;
-      const [start, end] = data.rangeBounds(q.get('range') || 'month', ctx.settings, { from: q.get('from'), to: q.get('to') });
-      let list = data.tradesBetween(gid, start, end, ctx.settings).reverse();
-      const out = q.get('outcome'), sym = (q.get('symbol') || '').toUpperCase(), lens = q.get('lens'), words = String(q.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean);
-      if (OUTCOMES[out]) list = list.filter((x) => x.outcome === out);
-      if (sym) list = list.filter((x) => (x.instrument || '').toUpperCase() === sym);
-      if (lens === 'nochart') list = list.filter((x) => x.editable && !x.hasChart);
-      if (lens === 'nonotes') list = list.filter((x) => x.editable && !x.hasNotes);
-      if (lens === 'big') list.sort((x, y) => Math.abs(y.pnl) - Math.abs(x.pnl));
-      if (words.length) list = list.filter((x) => { const hay = [x.instrument, x.direction, x.setup, x.session, x.date, ...Object.values(x.notes), String(Math.abs(x.pnl)), x.outcome].filter(Boolean).join(' ').toLowerCase(); return words.every((w) => hay.includes(w.replace(/[$,]/g, ''))); });
-      const symbols = [...new Set(data.tradesBetween(gid, start, end, ctx.settings).map((x) => (x.instrument || '').toUpperCase()).filter(Boolean))].sort();
+      const { list, all } = data.filterTrades(gid, q, ctx.settings);
+      const symbols = [...new Set(all.map((x) => (x.instrument || '').toUpperCase()).filter(Boolean))].sort();
       const page = Math.max(0, Number(q.get('page')) || 0), per = 50;
       return json(res, 200, { total: list.length, page, pages: Math.max(1, Math.ceil(list.length / per)), trades: list.slice(page * per, (page + 1) * per), symbols, stats: data.stats(list), currency: ctx.settings.currency });
+    }
+    if (area === 'export' && req.method === 'GET') {   // the ledger's current filters, as a CSV the importer reads back
+      const ctx = await guildCtx(req, res, gid); if (!ctx) return;
+      const { list } = data.filterTrades(gid, q, ctx.settings);
+      const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'server';
+      const name = `journal-${slug(ctx.guild.name)}-${slug(q.get('range') || 'month')}-${todayFor(ctx.settings)}.csv`;
+      const body = Buffer.from(data.tradesCsv(list, ctx.settings), 'utf8');
+      res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-length': body.length, 'content-disposition': `attachment; filename="${name}"`,
+        'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-trades': String(list.length), 'x-filename': name });
+      return res.end(body);
+    }
+    if (area === 'clear' && req.method === 'GET') {   // what clearing would remove, before anything is touched
+      const ctx = await guildCtx(req, res, gid, { panel: true }); if (!ctx) return;
+      if (!ctx.access.manage) return fail(res, 403, 'manage_only', 'Clearing trades needs Manage Server.');
+      const { list } = data.filterTrades(gid, q, ctx.settings), st = data.stats(list);
+      const dates = list.map((t) => t.date).sort();
+      return json(res, 200, { count: list.length, net: st.net, wins: st.w, losses: st.l,
+        first: dates[0] || null, last: dates[dates.length - 1] || null, botPosted: list.filter((t) => t.editable).length, currency: ctx.settings.currency,
+        spark: list.slice().reverse().map((t) => t.pnl), batches: db.archiveBatches(gid).map((b) => ({ id: b.id, at: b.at, n: b.n, net: (b.cents || 0) / 100, byMe: b.by === ctx.session.uid })) });
     }
     if (area === 'calendar' && req.method === 'GET') {
       const ctx = await guildCtx(req, res, gid); if (!ctx) return;
@@ -400,6 +411,26 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
         catch (e) { return fail(res, 403, 'no_permission', /Missing (Permissions|Access)/i.test(e.message) ? `The bot can't post in #${channel.name}. Give it View, Send Messages and Attach Files there.` : e.message); }
         return json(res, 200, { ok: true, channel: channel.name });
       }
+      if (a1 === 'clear') {   // the trades under the ledger's filters leave the journal (and, if asked, the bot's own posts leave Discord)
+        const body = await readBody(req);
+        if (String(body.confirm || '').trim().toLowerCase() !== 'delete') return fail(res, 400, 'confirm', 'Type delete to confirm.');
+        const { list } = data.filterTrades(gid, new URLSearchParams(String(body.query || '')), ctx.settings);
+        if (!list.length) return fail(res, 400, 'empty', 'Nothing matches these filters.');
+        if (body.expect !== undefined && Number(body.expect) !== list.length) return fail(res, 409, 'changed', `The journal changed while you were deciding: ${list.length} trades match now. Look again and confirm.`);
+        const batch = crypto.randomBytes(6).toString('base64url'), net = data.stats(list).net;
+        const n = db.archivePnl(gid, list.map((t) => t.key), batch, ctx.session.uid);
+        if (!body.discord) return json(res, 200, { ok: true, batch, cleared: n, net });
+        const rows = db.archivedRows(gid, batch);
+        const id = crypto.randomBytes(9).toString('base64url'), job = { kind: 'clear', gid, uid: ctx.session.uid, at: Date.now(), state: 'running', done: 0, total: rows.length, result: { deleted: 0, kept: 0, gone: 0, failed: [] } };
+        jobs.set(id, job);
+        deleteBotPosts(ctx.guild, rows, job).then(() => { job.state = 'done'; }).catch((e) => { job.state = 'failed'; job.error = e.message; });
+        return json(res, 200, { ok: true, batch, cleared: n, net, job: id, total: rows.length });
+      }
+      if (a1 === 'restore') {
+        const body = await readBody(req);
+        if (!/^[\w-]{4,16}$/.test(String(body.batch || ''))) return fail(res, 400, 'invalid', 'Pick a clear to undo.');
+        return json(res, 200, { ok: true, restored: db.restoreArchive(gid, body.batch) });
+      }
       if (a1 === 'redate-plan') {
         const { planRedate } = require('../lib/redate');
         const plan = planRedate(gid, ctx.settings);
@@ -422,6 +453,37 @@ module.exports = function routes(client, { json, fail, readBody, limited }) {
 
   function slim(t) { return { instrument: t.instrument, direction: t.direction, outcome: t.outcome, pnl: t.pnl_cents / 100, date: t.date, qty: t.qty, held: t.held, entry: t.entry, exit: t.exit }; }
   function cum(list) { let r = 0; return list.map((t) => (r += t.pnl_cents / 100)); }
+
+  /**
+   * After a clear that asked for it: deletes the posts the bot itself made for those trades. A trade that is a
+   * whole post goes with its post; a trade inside a destination post goes as that one message. Anything a member
+   * wrote is never touched: it stays cleared from the journal and can still be restored. The deleted trades leave
+   * the archive (nothing left to bring back) and the import log (so a re-uploaded CSV may post them again).
+   */
+  async function deleteBotPosts(guild, rows, job) {
+    const me = client.user?.id, gone = [];
+    for (const r of rows) {
+      job.last = r.date_local;
+      try {
+        const post = await guild.channels.fetch(r.container_id).catch(() => null);
+        if (!post) { job.result.gone += 1; gone.push(r.thread_id); }
+        else if (r.thread_id === r.container_id) {
+          if (!me || post.ownerId !== me) job.result.kept += 1;
+          else { await post.delete('Trades cleared from the web journal'); job.result.deleted += 1; gone.push(r.thread_id); }
+        } else {
+          const msg = await post.messages?.fetch(r.thread_id).catch(() => null);
+          if (!msg) { job.result.gone += 1; gone.push(r.thread_id); }
+          else if (!me || msg.author?.id !== me) job.result.kept += 1;
+          else { await msg.delete(); job.result.deleted += 1; gone.push(r.thread_id); }
+        }
+      } catch (e) {
+        if (job.result.failed.length < 20) job.result.failed.push(/Missing (Permissions|Access)/i.test(e.message) ? 'The bot needs Manage Threads and Manage Messages in the journal forums.' : e.message);
+      }
+      job.done += 1;
+    }
+    for (const k of gone) db.deletePnl(k);   // also drops its archive row
+    db.forgetImports(guild.id, gone);
+  }
 
   async function runImport(ctx, job) {
     const { toFields } = require('../lib/csv-import');

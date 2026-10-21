@@ -105,6 +105,10 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_pnl_container ON pnl_entries (container_
 // CSV imports: one row per trade already imported, so a file can be dropped twice safely
 db.exec('CREATE TABLE IF NOT EXISTS journal_imports (guild_id TEXT NOT NULL, hash TEXT NOT NULL, message_id TEXT, imported_at INTEGER NOT NULL, PRIMARY KEY (guild_id, hash))');
 db.exec('CREATE TABLE IF NOT EXISTS journal_import_runs (guild_id TEXT NOT NULL, at INTEGER NOT NULL, count INTEGER NOT NULL, last_trade_at INTEGER, file TEXT)');
+// trades cleared from the web journal: out of every total and card, never re-read by a rescan, and can come back
+db.exec(`CREATE TABLE IF NOT EXISTS pnl_archive (thread_id TEXT PRIMARY KEY, container_id TEXT, guild_id TEXT NOT NULL, batch_id TEXT NOT NULL,
+  row_json TEXT NOT NULL, archived_at INTEGER NOT NULL, archived_by TEXT)`);
+db.exec('CREATE INDEX IF NOT EXISTS pnl_archive_batch ON pnl_archive (guild_id, batch_id)');
 
 const DEFAULTS = {
   forums: [], default_forum_id: null, report_channel_id: null,
@@ -205,6 +209,7 @@ function insertEntry(e) {
 }
 function upsertPnl(e) {
   const was = getPnlEntry(e.thread_id);
+  db.prepare('DELETE FROM pnl_archive WHERE thread_id = ?').run(e.thread_id);   // a trade written again on purpose is back in the journal (the scanner skips cleared ones)
   db.prepare(`INSERT INTO pnl_entries (thread_id,container_id,guild_id,forum_id,outcome,pnl_cents,potential_cents,date_local,source,content_hash,updated_at)
     VALUES (@thread_id,@container_id,@guild_id,@forum_id,@outcome,@pnl_cents,@potential_cents,@date_local,@source,@content_hash,@updated_at)
     ON CONFLICT(thread_id) DO UPDATE SET container_id=excluded.container_id, guild_id=excluded.guild_id, forum_id=excluded.forum_id, outcome=excluded.outcome,
@@ -216,12 +221,51 @@ function upsertPnl(e) {
 }
 function getPnlEntry(threadId) { return db.prepare('SELECT * FROM pnl_entries WHERE thread_id = ?').get(threadId); }
 function deletePnl(threadId) {
+  db.prepare('DELETE FROM pnl_archive WHERE thread_id = ?').run(threadId);   // its message is gone: nothing left to bring back
   const was = getPnlEntry(threadId), n = db.prepare('DELETE FROM pnl_entries WHERE thread_id = ?').run(threadId).changes;
   if (n) changed(was?.guild_id);
   return n;
 }
 function pnlBetween(guildId, startISO, endISO) {
   return db.prepare('SELECT * FROM pnl_entries WHERE guild_id=? AND date_local>=? AND date_local<=? ORDER BY date_local').all(guildId, startISO, endISO);
+}
+
+/* ---------------- cleared trades: an archive the journal can be restored from ---------------- */
+const PNL_COLS = ['thread_id', 'container_id', 'guild_id', 'forum_id', 'outcome', 'pnl_cents', 'potential_cents', 'date_local', 'source', 'content_hash', 'updated_at'];
+/** moves these trades out of the journal into one batch; returns how many moved */
+const archivePnl = db.transaction((guildId, keys, batchId, by) => {
+  const get = db.prepare('SELECT * FROM pnl_entries WHERE thread_id = ? AND guild_id = ?');
+  const put = db.prepare('INSERT OR REPLACE INTO pnl_archive (thread_id, container_id, guild_id, batch_id, row_json, archived_at, archived_by) VALUES (?,?,?,?,?,?,?)');
+  const del = db.prepare('DELETE FROM pnl_entries WHERE thread_id = ?');
+  let n = 0;
+  for (const k of keys) {
+    const r = get.get(k, guildId); if (!r) continue;
+    put.run(r.thread_id, r.container_id, guildId, batchId, JSON.stringify(r), Date.now(), by || null); del.run(k); n += 1;
+  }
+  if (n) changed(guildId);
+  return n;
+});
+/** puts a batch back exactly as it was; a trade logged again since then keeps its newer row */
+const restoreArchive = db.transaction((guildId, batchId) => {
+  const rows = db.prepare('SELECT row_json FROM pnl_archive WHERE guild_id = ? AND batch_id = ?').all(guildId, batchId);
+  const ins = db.prepare(`INSERT OR IGNORE INTO pnl_entries (${PNL_COLS.join(',')}) VALUES (${PNL_COLS.map((c) => `@${c}`).join(',')})`);
+  let n = 0;
+  for (const { row_json } of rows) { const r = JSON.parse(row_json); n += ins.run(Object.fromEntries(PNL_COLS.map((c) => [c, r[c] ?? null]))).changes; }
+  db.prepare('DELETE FROM pnl_archive WHERE guild_id = ? AND batch_id = ?').run(guildId, batchId);
+  if (rows.length) changed(guildId);
+  return n;
+});
+function isArchived(key) { return !!db.prepare('SELECT 1 FROM pnl_archive WHERE thread_id = ?').get(key); }
+function archivedRows(guildId, batchId) { return db.prepare('SELECT row_json FROM pnl_archive WHERE guild_id = ? AND batch_id = ?').all(guildId, batchId).map((r) => JSON.parse(r.row_json)); }
+/** the latest clears, newest first: when, how many, their net and who cleared them */
+function archiveBatches(guildId) {
+  return db.prepare(`SELECT batch_id AS id, MIN(archived_at) AS at, COUNT(*) AS n, SUM(CASE WHEN json_extract(row_json, '$.outcome') = 'missed' THEN 0 ELSE json_extract(row_json, '$.pnl_cents') END) AS cents, MAX(archived_by) AS by
+    FROM pnl_archive WHERE guild_id = ? GROUP BY batch_id ORDER BY at DESC LIMIT 8`).all(guildId);
+}
+/** after the bot deleted posts in Discord: a re-uploaded CSV may post those trades again */
+function forgetImports(guildId, messageIds) {
+  const q = db.prepare('DELETE FROM journal_imports WHERE guild_id = ? AND message_id = ?');
+  for (const id of messageIds) q.run(guildId, id);
 }
 /**
  * The journal details (instrument, direction, R, when it was logged) behind
@@ -334,6 +378,7 @@ function pnlKeysForContainer(containerId) {
   return db.prepare('SELECT thread_id FROM pnl_entries WHERE container_id=?').all(containerId).map((r) => r.thread_id);
 }
 function deletePnlByContainer(containerId) {
+  db.prepare('DELETE FROM pnl_archive WHERE container_id = ?').run(containerId);   // the post itself is gone
   const g = db.prepare('SELECT guild_id FROM pnl_entries WHERE container_id = ? LIMIT 1').get(containerId)?.guild_id;
   const n = db.prepare('DELETE FROM pnl_entries WHERE container_id = ?').run(containerId).changes;
   if (n) changed(g);
@@ -360,5 +405,5 @@ function getReport(guildId, kind, periodKey) {
   return db.prepare('SELECT * FROM report_log WHERE guild_id=? AND kind=? AND period_key=?').get(guildId, kind, periodKey);
 }
 
-module.exports = { db, changes, DEFAULTS, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
+module.exports = { db, changes, DEFAULTS, archivePnl, restoreArchive, isArchived, archivedRows, archiveBatches, forgetImports, getSettings, saveSettings, listConfiguredGuilds, createDraft, getDraft, saveDraft, deleteDraft, purgeDrafts,
   insertEntry, upsertPnl, getPnlEntry, deletePnl, pnlBetween, entryDetailsFor, entriesForKeys, publicCounts, journalStamp, importedHashes, markImported, backfillImported, lastImportRun, recordImportRun, journaledOn, editableTrades, getEntry, updateEntry, pnlRowsForForum, pnlKeysForContainer, deletePnlByContainer, claimReport, finishReport, getReport };
